@@ -65,6 +65,18 @@ describe('Roommate Groups & Random Matching Queue Rules', () => {
     expect(updatedA?.current_group?.status).toBe('READY_FOR_ALLOCATION');
     expect(updatedA?.current_group?.member_count).toBe(2);
     expect(updatedA?.current_group?.eligible_at).toBeDefined();
+    expect(updatedA?.current_group?.provisional_room?.capacity).toBe(2);
+    const matched = MatchingService.getQueueItems('MALE', 'MATCHED', 2);
+    expect(matched.some((item: any) => item.student_id === stuA.student.id && item.matched_group_id === updatedA?.current_group?.id)).toBe(true);
+  });
+
+  it('returns a meaningful FIFO matching summary without crossing facilities', () => {
+    const female = StudentService.registerStudent({ full_name: 'Female Queue Student', phone_number: '+17771110009', gender: 'FEMALE', department: 'Biotech', academic_level: '100 Level', preferred_occupancy: 2, roommate_mode: 'RANDOM', consent_random_matching: true });
+    const summary = MatchingService.runMatching('MALE', 2);
+    expect(summary.students_still_waiting).toBeGreaterThanOrEqual(1);
+    const femaleQueueRecords = MatchingService.getQueueItems('FEMALE', 'ALL', 2);
+    expect(femaleQueueRecords.some((item: any) => item.student_id === female.student.id)).toBe(true);
+    expect(femaleQueueRecords.find((item: any) => item.student_id === female.student.id)?.hostel_code).toBe('FEMALE');
   });
 
   it('prevents a student from joining a full group with invitation code', () => {

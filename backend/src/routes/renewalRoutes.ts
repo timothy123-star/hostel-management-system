@@ -4,6 +4,7 @@ import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddlewa
 import { SendRenewalReminderSchema } from '@hostel/shared';
 
 export const renewalRouter = Router();
+renewalRouter.use(authMiddleware);
 
 renewalRouter.get('/', (req, res, next) => {
   try {

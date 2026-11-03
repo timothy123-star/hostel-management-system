@@ -4,6 +4,7 @@ import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddlewa
 import { StudentRegistrationSchema } from '@hostel/shared';
 
 export const studentRouter = Router();
+studentRouter.use(authMiddleware);
 
 studentRouter.get('/', (req, res, next) => {
   try {

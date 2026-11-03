@@ -91,21 +91,9 @@ export class BookingGroupService {
         VALUES (?, ?, ?, ?, 'USD', 'PENDING', ?, ?, ?)
       `).run(paymentId, params.studentId, groupId, amount, refCode, now, now);
 
-      // Automatically hold compatible room if group is single room
-      if (isComplete) {
-        const availableRoom = db.prepare(`
-          SELECT r.id FROM rooms r
-          WHERE r.hostel_id = ? AND r.capacity = ? AND r.status = 'AVAILABLE'
-            AND r.id NOT IN (SELECT held_room_id FROM booking_groups WHERE held_room_id IS NOT NULL AND status IN ('FORMING', 'READY_FOR_ALLOCATION'))
-          ORDER BY r.room_number ASC
-          LIMIT 1
-        `).get(hostel.id, params.targetCapacity) as any;
-
-        if (availableRoom) {
-          db.prepare('UPDATE booking_groups SET held_room_id = ? WHERE id = ?').run(availableRoom.id, groupId);
-        }
-      }
     })();
+
+    if (isComplete) this.assignProvisionalHolds(hostel.id, params.targetCapacity);
 
     return this.getGroupById(groupId)!;
   }
@@ -190,22 +178,37 @@ export class BookingGroupService {
           WHERE id = ?
         `).run(now, now, group.id);
 
-        // Auto-hold a compatible room if available
-        const availableRoom = db.prepare(`
-          SELECT r.id FROM rooms r
-          WHERE r.hostel_id = ? AND r.capacity = ? AND r.status = 'AVAILABLE'
-            AND r.id NOT IN (SELECT held_room_id FROM booking_groups WHERE held_room_id IS NOT NULL AND status IN ('FORMING', 'READY_FOR_ALLOCATION'))
-          ORDER BY r.room_number ASC
-          LIMIT 1
-        `).get(group.hostel_id, group.target_capacity) as any;
-
-        if (availableRoom) {
-          db.prepare('UPDATE booking_groups SET held_room_id = ? WHERE id = ?').run(availableRoom.id, group.id);
-        }
       }
     })();
 
+    if (isNowComplete) this.assignProvisionalHolds(group.hostel_id, group.target_capacity);
+
     return this.getGroupById(group.id)!;
+  }
+
+  /** Assign FIFO provisional holds only after a group is complete and eligible. */
+  static assignProvisionalHolds(hostelId?: string, capacity?: RoomCapacity) {
+    const db = getDb();
+    let sql = `SELECT * FROM booking_groups WHERE status = 'READY_FOR_ALLOCATION' AND held_room_id IS NULL`;
+    const args: any[] = [];
+    if (hostelId) { sql += ' AND hostel_id = ?'; args.push(hostelId); }
+    if (capacity) { sql += ' AND target_capacity = ?'; args.push(capacity); }
+    sql += ' ORDER BY eligible_at ASC, created_at ASC';
+    const groups = db.prepare(sql).all(...args) as any[];
+    const assigned: string[] = [];
+    db.transaction(() => {
+      for (const group of groups) {
+        const room = db.prepare(`SELECT r.id FROM rooms r WHERE r.hostel_id = ? AND r.capacity = ? AND r.status = 'AVAILABLE'
+          AND NOT EXISTS (SELECT 1 FROM booking_groups bg WHERE bg.held_room_id = r.id AND bg.status IN ('READY_FOR_ALLOCATION', 'FORMING'))
+          AND (SELECT COUNT(*) FROM room_allocations ra WHERE ra.room_id = r.id AND ra.status IN ('HOLD', 'FINALIZED')) = 0
+          ORDER BY r.room_number ASC LIMIT 1`).get(group.hostel_id, group.target_capacity) as any;
+        if (room) {
+          db.prepare('UPDATE booking_groups SET held_room_id = ?, updated_at = ? WHERE id = ? AND held_room_id IS NULL').run(room.id, new Date().toISOString(), group.id);
+          assigned.push(group.id);
+        }
+      }
+    })();
+    return assigned;
   }
 
   /**
@@ -236,6 +239,7 @@ export class BookingGroupService {
     const member_count = members.length;
     const all_payments_verified = member_count === group.target_capacity &&
       members.every(m => m.payment_status === 'VERIFIED');
+    const heldRoom = group.held_room_id ? db.prepare('SELECT room_number, capacity, price_per_student FROM rooms WHERE id = ?').get(group.held_room_id) as any : null;
 
     return {
       ...group,
@@ -274,7 +278,8 @@ export class BookingGroupService {
         } : undefined
       })),
       member_count,
-      all_payments_verified
+      all_payments_verified,
+      provisional_room: heldRoom
     };
   }
 

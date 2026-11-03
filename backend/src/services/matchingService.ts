@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { getDb } from '../db/connection.js';
 import { HostelCode, RoomCapacity } from '@hostel/shared';
+import { BookingGroupService } from './bookingGroupService.js';
 
 export class MatchingService {
   /**
@@ -175,6 +176,7 @@ export class MatchingService {
         }
       })();
     }
+    BookingGroupService.assignProvisionalHolds(hostelId, capacity);
   }
 
   static runMatching(hostelCode?: HostelCode, capacity?: RoomCapacity) {
@@ -183,15 +185,28 @@ export class MatchingService {
       ? db.prepare('SELECT id FROM hostels WHERE code = ?').all(hostelCode) as any[]
       : db.prepare('SELECT id FROM hostels').all() as any[];
     let processed = 0;
+    const completedGroupsBefore = db.prepare("SELECT COUNT(*) as count FROM booking_groups WHERE status = 'READY_FOR_ALLOCATION'").get() as any;
     for (const hostel of hostels) {
       for (const requestedCapacity of (capacity ? [capacity] : [2, 3]) as RoomCapacity[]) {
         const before = db.prepare("SELECT COUNT(*) as count FROM matching_queue WHERE hostel_id = ? AND target_capacity = ? AND status = 'WAITING'").get(hostel.id, requestedCapacity) as any;
         this.attemptMatching(hostel.id, requestedCapacity);
         const after = db.prepare("SELECT COUNT(*) as count FROM matching_queue WHERE hostel_id = ? AND target_capacity = ? AND status = 'WAITING'").get(hostel.id, requestedCapacity) as any;
         processed += before.count - after.count;
+        BookingGroupService.assignProvisionalHolds(hostel.id, requestedCapacity);
       }
     }
-    return { processed };
+    const completedGroupsAfter = db.prepare("SELECT COUNT(*) as count FROM booking_groups WHERE status = 'READY_FOR_ALLOCATION'").get() as any;
+    const stillWaiting = db.prepare("SELECT COUNT(*) as count FROM matching_queue WHERE status = 'WAITING'").get() as any;
+    const exclusions = db.prepare(`SELECT
+      SUM(CASE WHEN s.consent_random_matching != 1 THEN 1 ELSE 0 END) as missing_consent,
+      SUM(CASE WHEN mq.status = 'MATCHED' THEN 1 ELSE 0 END) as already_matched
+      FROM matching_queue mq JOIN students s ON s.id = mq.student_id`).get() as any;
+    return {
+      groups_completed: completedGroupsAfter.count - completedGroupsBefore.count,
+      students_matched: processed,
+      students_still_waiting: stillWaiting.count,
+      excluded: { missing_consent: exclusions.missing_consent || 0, already_matched: exclusions.already_matched || 0, insufficient_compatible_candidates: stillWaiting.count }
+    };
   }
 
   static completeKnownTripleGroup(groupId: string, queueItemId: string): void {
@@ -220,12 +235,13 @@ export class MatchingService {
         VALUES (?, ?, ?, ?, 'USD', 'PENDING', ?, ?, ?)`)
         .run(`pay-${crypto.randomUUID()}`, selected.student_id, groupId, room?.price_per_student || 600, `REF-${crypto.randomBytes(4).toString('hex').toUpperCase()}`, now, now);
     })();
+    BookingGroupService.assignProvisionalHolds(group.hostel_id, 3);
   }
 
   /**
    * Retrieves active matching queue items
    */
-  static getQueueItems(hostelCode?: HostelCode) {
+  static getQueueItems(hostelCode?: HostelCode, status?: string, capacity?: RoomCapacity) {
     const db = getDb();
     let query = `
       SELECT mq.*, 
@@ -234,13 +250,15 @@ export class MatchingService {
       FROM matching_queue mq
       JOIN students s ON mq.student_id = s.id
       JOIN hostels h ON mq.hostel_id = h.id
-      WHERE mq.status = 'WAITING'
+      WHERE 1=1
     `;
     const params: any[] = [];
     if (hostelCode) {
       query += ' AND h.code = ? ';
       params.push(hostelCode);
     }
+    if (status && status !== 'ALL') { query += ' AND mq.status = ? '; params.push(status); }
+    if (capacity) { query += ' AND mq.target_capacity = ? '; params.push(capacity); }
     query += ' ORDER BY mq.queued_at ASC ';
 
     return db.prepare(query).all(...params);

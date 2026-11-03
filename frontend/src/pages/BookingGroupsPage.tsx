@@ -20,6 +20,9 @@ export const BookingGroupsPage: React.FC = () => {
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const [relocatingGroup, setRelocatingGroup] = useState<BookingGroup | null>(null);
+  const [relocationRoomId, setRelocationRoomId] = useState('');
+  const [relocationReason, setRelocationReason] = useState('');
 
   const loadGroups = async () => {
     setIsLoading(true);
@@ -81,6 +84,20 @@ export const BookingGroupsPage: React.FC = () => {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const openGroupRelocation = async (group: BookingGroup) => {
+    setRelocatingGroup(group); setRelocationReason('');
+    const res = await api.getRooms(group.hostel_code);
+    const candidates = res.rooms.filter(room => room.id !== group.held_room_id && room.capacity === group.target_capacity && room.status !== 'MAINTENANCE' && (room.current_occupants || 0) === 0);
+    setAvailableRooms(candidates); setRelocationRoomId(candidates[0]?.id || '');
+  };
+
+  const submitGroupRelocation = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!relocatingGroup || !relocationRoomId || relocationReason.trim().length < 3) return;
+    await api.reallocateGroup({ groupId: relocatingGroup.id, newRoomId: relocationRoomId, reason: relocationReason.trim() });
+    setRelocatingGroup(null); await loadGroups();
   };
 
   return (
@@ -154,6 +171,7 @@ export const BookingGroupsPage: React.FC = () => {
                   <span>Target Occupancy: <strong className="text-slate-700">{g.target_capacity}-Person Room</strong></span>
                   <span>Members: <strong className="text-slate-700">{g.member_count || 0}/{g.target_capacity}</strong></span>
                 </div>
+                {g.provisional_room && <div className="mb-4 p-3 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-900"><strong>Temporary room hold — not allocated:</strong> Room {g.provisional_room.room_number}, capacity {g.provisional_room.capacity}, ${g.provisional_room.price_per_student} per student. This proposal is shown before payment and is released if final allocation does not proceed.</div>}
 
                 {/* Member List */}
                 <div className="space-y-2 mb-4">
@@ -196,10 +214,8 @@ export const BookingGroupsPage: React.FC = () => {
                 )}
 
                 {g.status === 'ALLOCATED' && (
-                  <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 text-center flex items-center justify-center gap-1.5 font-medium">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    Allocation finalized & digital QR passes active.
-                  </div>
+                  <div className="space-y-2"><div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 text-center flex items-center justify-center gap-1.5 font-medium"><CheckCircle2 className="w-4 h-4 text-emerald-600" /> Allocation finalized & digital QR passes active.</div>
+                  <button onClick={() => openGroupRelocation(g)} className="w-full py-2 text-xs font-semibold rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50">Relocate whole group (reason required)</button></div>
                 )}
               </div>
             </div>
@@ -308,6 +324,17 @@ export const BookingGroupsPage: React.FC = () => {
             </div>
           </form>
         )}
+      </Modal>
+
+      <Modal isOpen={!!relocatingGroup} onClose={() => setRelocatingGroup(null)} title={`Relocate Group — ${relocatingGroup?.group_code}`} maxWidth="md">
+        <form onSubmit={submitGroupRelocation} className="space-y-4">
+          <p className="text-xs text-slate-600">This moves every active member together, preserving their accommodation dates and QR credentials. Only an empty room of the same facility and occupancy may be selected.</p>
+          <select value={relocationRoomId} onChange={e => setRelocationRoomId(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" required>
+            {availableRooms.map(room => <option key={room.id} value={room.id}>Room {room.room_number} — {room.capacity} beds, ${room.price_per_student}/student</option>)}
+          </select>
+          <input value={relocationReason} onChange={e => setRelocationReason(e.target.value)} placeholder="Documented manager reason" className="w-full px-3 py-2 border rounded-xl text-sm" required />
+          <button disabled={!relocationRoomId || relocationReason.trim().length < 3} className="w-full py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold disabled:opacity-50">Confirm whole-group relocation</button>
+        </form>
       </Modal>
     </div>
   );

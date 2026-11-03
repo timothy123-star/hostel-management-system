@@ -4,6 +4,7 @@ import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddlewa
 import { UpdateRoomPriceSchema, CreateRoomSchema } from '@hostel/shared';
 
 export const hostelRouter = Router();
+hostelRouter.use(authMiddleware);
 
 hostelRouter.get('/', (req, res, next) => {
   try {

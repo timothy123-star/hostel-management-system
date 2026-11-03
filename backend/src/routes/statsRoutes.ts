@@ -3,6 +3,7 @@ import { StatsService } from '../services/statsService.js';
 import { authMiddleware } from '../middleware/authMiddleware.js';
 
 export const statsRouter = Router();
+statsRouter.use(authMiddleware);
 
 statsRouter.get('/overview', (req, res, next) => {
   try {

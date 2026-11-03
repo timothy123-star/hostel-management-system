@@ -4,6 +4,7 @@ import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddlewa
 import { ComposeAnnouncementSchema } from '@hostel/shared';
 
 export const announcementRouter = Router();
+announcementRouter.use(authMiddleware);
 
 announcementRouter.get('/', (req, res, next) => {
   try {

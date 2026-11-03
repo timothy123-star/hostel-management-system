@@ -87,7 +87,10 @@ export const api = {
     return apiRequest<{ groups: any[] }>(`/bookings/groups${q ? `?${q}` : ''}`);
   },
   getBookingGroupById: (id: string) => apiRequest<{ group: any }>(`/bookings/groups/${id}`),
-  getMatchingQueue: (hostel?: string) => apiRequest<{ queue: any[] }>(`/bookings/matching-queue${hostel ? `?hostel=${hostel}` : ''}`),
+  getMatchingQueue: (hostel?: string, status?: string, capacity?: number) => {
+    const q = new URLSearchParams({ ...(hostel && { hostel }), ...(status && status !== 'ALL' && { status }), ...(capacity && { capacity: String(capacity) }) }).toString();
+    return apiRequest<{ queue: any[] }>(`/bookings/matching-queue${q ? `?${q}` : ''}`);
+  },
   runMatching: (hostel?: string, capacity?: number) => apiRequest<{ processed: number }>('/bookings/matching/run', {
     method: 'POST', body: JSON.stringify({ hostel, capacity })
   }),
@@ -130,6 +133,10 @@ export const api = {
         new_room_id: data.newRoomId,
         reason: data.reason
       })
+    }),
+  reallocateGroup: (data: { groupId: string; newRoomId: string; reason: string }) =>
+    apiRequest<{ allocations: any[] }>(`/allocations/groups/${data.groupId}/reallocate`, {
+      method: 'POST', body: JSON.stringify({ new_room_id: data.newRoomId, reason: data.reason })
     }),
 
   // QR & Access

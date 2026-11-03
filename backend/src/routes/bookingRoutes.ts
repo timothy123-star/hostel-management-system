@@ -4,6 +4,7 @@ import { MatchingService } from '../services/matchingService.js';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddleware.js';
 
 export const bookingRouter = Router();
+bookingRouter.use(authMiddleware);
 
 bookingRouter.get('/groups', (req, res, next) => {
   try {
@@ -30,8 +31,10 @@ bookingRouter.get('/groups/:id', (req, res, next) => {
 
 bookingRouter.get('/matching-queue', (req, res, next) => {
   try {
-    const { hostel } = req.query as any;
-    const queue = MatchingService.getQueueItems(hostel);
+    const { hostel, status, capacity } = req.query as any;
+    const parsedCapacity = capacity ? Number(capacity) : undefined;
+    if (parsedCapacity !== undefined && ![1, 2, 3].includes(parsedCapacity)) throw new Error('Capacity must be 1, 2, or 3.');
+    const queue = MatchingService.getQueueItems(hostel, status, parsedCapacity as 1 | 2 | 3 | undefined);
     res.json({ queue });
   } catch (err) {
     next(err);

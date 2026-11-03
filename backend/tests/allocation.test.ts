@@ -124,4 +124,13 @@ describe('Room Allocation & Facility Separation Rules', () => {
     expect(moved.room_id).toBe('rm-m-104');
     expect((db.prepare("SELECT status FROM rooms WHERE id = 'rm-m-101'").get() as any).status).toBe('AVAILABLE');
   });
+
+  it('moves a shared group together and rejects individual movement', () => {
+    const db = getDb();
+    expect(() => AllocationService.reallocateStudent({ studentId: 'stu-demo-02', newRoomId: 'rm-f-202', reason: 'Split group', adminId: 'admin-root-01' })).toThrow(/relocated together/i);
+    const moved = AllocationService.reallocateGroup({ groupId: 'grp-demo-02', newRoomId: 'rm-f-202', reason: 'Floor maintenance relocation', adminId: 'admin-root-01' });
+    expect(moved).toHaveLength(2);
+    expect((db.prepare("SELECT COUNT(*) as count FROM room_allocations WHERE room_id = 'rm-f-202' AND status = 'FINALIZED'").get() as any).count).toBe(2);
+    expect((db.prepare("SELECT status FROM rooms WHERE id = 'rm-f-201'").get() as any).status).toBe('AVAILABLE');
+  });
 });

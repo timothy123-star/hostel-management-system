@@ -161,6 +161,11 @@ export class ConversationHandler {
       if (group.status === 'FORMING') {
         text += `👉 *Share Code:* Share code *${group.group_code}* with your roommates so they can join this group.\n`;
       }
+      if (group.provisional_room) {
+        text += `\n🛏️ *Temporary Room Hold (not final allocation):* Room ${group.provisional_room.room_number}, ` +
+          `${group.provisional_room.capacity}-person capacity, $${group.provisional_room.price_per_student} per student.\n` +
+          `_All group payments must be verified before the manager can finalize this room._\n`;
+      }
     }
 
     if (payment) {

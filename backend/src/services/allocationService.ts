@@ -235,6 +235,10 @@ export class AllocationService {
     if (!currentAlloc) {
       throw new Error('Student does not have an active finalized room allocation to move.');
     }
+    const activeGroupMembers = db.prepare(`SELECT COUNT(*) as count FROM booking_group_members WHERE group_id = ?`).get(currentAlloc.booking_group_id) as any;
+    if (activeGroupMembers.count > 1) {
+      throw new Error('Students in a shared group must be relocated together. Use group reallocation to preserve membership and occupancy integrity.');
+    }
 
     // Fetch target room
     const newRoom = db.prepare(`
@@ -335,5 +339,38 @@ export class AllocationService {
     });
 
     return db.prepare('SELECT * FROM room_allocations WHERE student_id = ? AND status = \'FINALIZED\'').get(params.studentId) as RoomAllocation;
+  }
+
+  static reallocateGroup(params: { groupId: string; newRoomId: string; reason: string; adminId?: string }): RoomAllocation[] {
+    const db = getDb();
+    const group = BookingGroupService.getGroupById(params.groupId);
+    if (!group || group.status !== 'ALLOCATED' || !group.members?.length) throw new Error('Only finalized groups can be relocated.');
+    const newRoom = db.prepare('SELECT * FROM rooms WHERE id = ?').get(params.newRoomId) as any;
+    if (!newRoom || newRoom.status === 'MAINTENANCE') throw new Error('Target room is unavailable or under maintenance.');
+    if (newRoom.hostel_id !== group.hostel_id || newRoom.capacity !== group.target_capacity) throw new Error('Target room must be in the same facility and match the group occupancy.');
+    const occupants = db.prepare("SELECT COUNT(*) as count FROM room_allocations WHERE room_id = ? AND status = 'FINALIZED'").get(params.newRoomId) as any;
+    if (occupants.count + group.members.length > newRoom.capacity) throw new Error('Target room does not have enough physical capacity for the full group.');
+    const allocations = db.prepare("SELECT * FROM room_allocations WHERE booking_group_id = ? AND status = 'FINALIZED'").all(params.groupId) as any[];
+    const now = new Date().toISOString();
+    const created: RoomAllocation[] = [];
+    db.transaction(() => {
+      for (const old of allocations) {
+        db.prepare("UPDATE room_allocations SET status = 'MOVED', updated_at = ? WHERE id = ?").run(now, old.id);
+        const id = `alloc-${crypto.randomUUID()}`;
+        db.prepare(`INSERT INTO room_allocations (id, room_id, student_id, booking_group_id, status, allocated_by_admin_id, accommodation_start_date, accommodation_end_date, created_at, updated_at)
+          VALUES (?, ?, ?, ?, 'FINALIZED', ?, ?, ?, ?, ?)`)
+          .run(id, params.newRoomId, old.student_id, params.groupId, params.adminId || null, old.accommodation_start_date, old.accommodation_end_date, now, now);
+        db.prepare("UPDATE qr_credentials SET room_allocation_id = ?, updated_at = ? WHERE student_id = ? AND status = 'ACTIVE'").run(id, now, old.student_id);
+        created.push({ ...old, id, room_id: params.newRoomId, status: 'FINALIZED', updated_at: now });
+      }
+      for (const oldRoomId of [...new Set(allocations.map(a => a.room_id))]) {
+        const remaining = db.prepare("SELECT COUNT(*) as count FROM room_allocations WHERE room_id = ? AND status = 'FINALIZED'").get(oldRoomId) as any;
+        if (remaining.count === 0) db.prepare("UPDATE rooms SET status = 'AVAILABLE', updated_at = ? WHERE id = ? AND status != 'MAINTENANCE'").run(now, oldRoomId);
+      }
+      db.prepare("UPDATE rooms SET status = 'OCCUPIED', updated_at = ? WHERE id = ?").run(now, params.newRoomId);
+      db.prepare("UPDATE booking_groups SET held_room_id = ?, updated_at = ? WHERE id = ?").run(params.newRoomId, now, params.groupId);
+    })();
+    AuditService.log({ adminId: params.adminId, action: 'REALLOCATE_GROUP_OVERRIDE', entityType: 'BOOKING_GROUP', entityId: params.groupId, newValues: { new_room_id: params.newRoomId, reason: params.reason }, notes: `Manager relocated group ${group.group_code}: ${params.reason}` });
+    return created;
   }
 }

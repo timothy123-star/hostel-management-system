@@ -6,6 +6,9 @@ import { StatusBadge } from '../components/StatusBadge.js';
 export const MatchingQueuePage: React.FC = () => {
   const [queue, setQueue] = useState<any[]>([]);
   const [filterHostel, setFilterHostel] = useState<string>('ALL');
+  const [filterStatus, setFilterStatus] = useState<string>('WAITING');
+  const [filterCapacity, setFilterCapacity] = useState<number | undefined>();
+  const [summary, setSummary] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [groups, setGroups] = useState<any[]>([]);
   const [isRunning, setIsRunning] = useState(false);
@@ -14,7 +17,7 @@ export const MatchingQueuePage: React.FC = () => {
     setIsLoading(true);
     try {
       const [res, groupRes] = await Promise.all([
-        api.getMatchingQueue(filterHostel !== 'ALL' ? filterHostel : undefined),
+        api.getMatchingQueue(filterHostel !== 'ALL' ? filterHostel : undefined, filterStatus, filterCapacity),
         api.getBookingGroups(filterHostel !== 'ALL' ? filterHostel : undefined, 'FORMING')
       ]);
       setQueue(res.queue);
@@ -28,11 +31,11 @@ export const MatchingQueuePage: React.FC = () => {
 
   useEffect(() => {
     loadQueue();
-  }, [filterHostel]);
+  }, [filterHostel, filterStatus, filterCapacity]);
 
   const runMatching = async () => {
     setIsRunning(true);
-    try { await api.runMatching(filterHostel !== 'ALL' ? filterHostel : undefined); await loadQueue(); }
+    try { setSummary(await api.runMatching(filterHostel !== 'ALL' ? filterHostel : undefined, filterCapacity)); await loadQueue(); }
     catch (err: any) { alert(err.message || 'Matching failed'); }
     finally { setIsRunning(false); }
   };
@@ -51,6 +54,8 @@ export const MatchingQueuePage: React.FC = () => {
           Students who opted into random matching. Strictly partitioned by hostel facility, room capacity, and FIFO priority timestamp.
         </p>
       </div>
+
+      {summary && <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">Matching summary: {summary.groups_completed} group(s) completed, {summary.students_matched} student(s) matched, {summary.students_still_waiting} still waiting. Exclusions: {summary.excluded?.missing_consent || 0} missing consent, {summary.excluded?.already_matched || 0} already matched, {summary.excluded?.insufficient_compatible_candidates || 0} awaiting compatible candidates.</div>}
 
       <div className="flex flex-wrap gap-3 items-center justify-between bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
         <p className="text-xs text-slate-600">Run FIFO matching after reviewing the consented queue. A known triple pair can only receive the earliest compatible consenting student.</p>
@@ -87,8 +92,9 @@ export const MatchingQueuePage: React.FC = () => {
       </div>
 
       {/* Filter Bar */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center justify-between gap-4 shadow-sm">
-        <div className="flex items-center gap-1.5">
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-4 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1.5">
           <Filter className="w-3.5 h-3.5 text-slate-400" />
           <span className="text-xs font-semibold text-slate-600">Facility:</span>
           <select
@@ -99,6 +105,13 @@ export const MatchingQueuePage: React.FC = () => {
             <option value="ALL">All Facilities</option>
             <option value="MALE">Alpha Male Hall</option>
             <option value="FEMALE">Beta Female Hall</option>
+          </select>
+          </div>
+          <select value={filterCapacity || 'ALL'} onChange={e => setFilterCapacity(e.target.value === 'ALL' ? undefined : Number(e.target.value))} className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-xl bg-slate-50 font-medium">
+            <option value="ALL">All occupancies</option><option value="1">Single</option><option value="2">Double</option><option value="3">Triple</option>
+          </select>
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-xl bg-slate-50 font-medium">
+            <option value="WAITING">Waiting</option><option value="MATCHED">Matched</option><option value="CANCELLED">Unavailable / Cancelled</option><option value="ALL">All statuses</option>
           </select>
         </div>
 
@@ -122,6 +135,7 @@ export const MatchingQueuePage: React.FC = () => {
                   <th className="py-3 px-4">Requested Occupancy</th>
                   <th className="py-3 px-4">Department & Level</th>
                   <th className="py-3 px-4">Consent Status</th>
+                  <th className="py-3 px-4">Eligibility / Group</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -156,9 +170,18 @@ export const MatchingQueuePage: React.FC = () => {
                       {item.department} ({item.academic_level})
                     </td>
                     <td className="py-3 px-4">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        <ShieldCheck className="w-3 h-3" /> Independently Consented
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${item.consent_random_matching === 1 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
+                        <ShieldCheck className="w-3 h-3" /> {item.consent_random_matching === 1 ? 'Independently Consented' : 'Consent Missing'}
                       </span>
+                    </td>
+                    <td className="py-3 px-4 text-slate-600">
+                      {item.status === 'MATCHED'
+                        ? <span className="text-emerald-700 font-semibold">Matched — group {item.matched_group_id}</span>
+                        : item.status !== 'WAITING'
+                          ? <span className="text-rose-700">Unavailable: {item.status.toLowerCase()}</span>
+                          : item.consent_random_matching !== 1
+                            ? <span className="text-rose-700">Not eligible: missing independent consent</span>
+                            : <span className="text-amber-700">Eligible; waiting for same-facility {item.target_capacity}-person FIFO candidates</span>}
                     </td>
                   </tr>
                 ))}

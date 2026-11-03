@@ -4,6 +4,7 @@ import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddlewa
 import { VerifyPaymentSchema, RejectPaymentSchema } from '@hostel/shared';
 
 export const paymentRouter = Router();
+paymentRouter.use(authMiddleware);
 
 paymentRouter.get('/', (req, res, next) => {
   try {

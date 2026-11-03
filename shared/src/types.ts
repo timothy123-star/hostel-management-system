@@ -88,6 +88,7 @@ export interface BookingGroup {
   members?: (BookingGroupMember & { student: Student; payment?: Payment })[];
   member_count?: number;
   all_payments_verified?: boolean;
+  provisional_room?: { room_number: string; capacity: RoomCapacity; price_per_student: number } | null;
 }
 
 export interface BookingGroupMember {

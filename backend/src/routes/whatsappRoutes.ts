@@ -91,6 +91,7 @@ whatsappRouter.get('/status', (req, res) => {
  * 4. Simulator History
  */
 whatsappRouter.get('/simulator/history', (req, res) => {
+  if (WhatsAppService.getStatus().is_live) return res.status(404).json({ error: 'Local simulator is unavailable in live mode.' });
   const phone = req.query.phone as string;
   const history = SimulatorProvider.getHistory(phone);
   res.json({ history });
@@ -101,6 +102,7 @@ whatsappRouter.get('/simulator/history', (req, res) => {
  */
 whatsappRouter.post('/simulator/send', async (req, res, next) => {
   try {
+    if (WhatsAppService.getStatus().is_live) { res.status(404).json({ error: 'Local simulator is unavailable in live mode.' }); return; }
     const { from, textBody, buttonId } = req.body;
     if (!from) {
       res.status(400).json({ error: 'Phone number (from) is required' });
@@ -126,6 +128,7 @@ whatsappRouter.post('/simulator/send', async (req, res, next) => {
  * 6. Clear Simulator History
  */
 whatsappRouter.post('/simulator/clear', (req, res) => {
+  if (WhatsAppService.getStatus().is_live) return res.status(404).json({ error: 'Local simulator is unavailable in live mode.' });
   SimulatorProvider.clearHistory();
   res.json({ success: true });
 });

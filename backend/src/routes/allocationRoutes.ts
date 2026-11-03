@@ -35,3 +35,11 @@ allocationRouter.post('/reallocate', authMiddleware, (req: AuthenticatedRequest,
     next(err);
   }
 });
+
+allocationRouter.post('/groups/:id/reallocate', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { new_room_id, reason } = req.body;
+    if (!new_room_id || !reason || reason.trim().length < 3) throw new Error('A target room and documented reason are required.');
+    res.json({ allocations: AllocationService.reallocateGroup({ groupId: req.params.id, newRoomId: new_room_id, reason: reason.trim(), adminId: req.admin?.id }) });
+  } catch (err) { next(err); }
+});
