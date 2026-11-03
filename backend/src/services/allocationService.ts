@@ -1,0 +1,316 @@
+import crypto from 'crypto';
+import { getDb } from '../db/connection.js';
+import { RoomAllocation, HostelCode, Room } from '@hostel/shared';
+import { AuditService } from './auditService.js';
+import { QRService } from './qrService.js';
+import { BookingGroupService } from './bookingGroupService.js';
+
+export class AllocationService {
+  /**
+   * Calculates expiry date exactly 12 months after accommodation start date.
+   */
+  static calculateExpiryDate(startDateStr: string): string {
+    const [year, month, day] = startDateStr.split('-').map(Number);
+    // 12 months later on same day (or leap year adjustment)
+    const nextYear = year + 1;
+    const mStr = String(month).padStart(2, '0');
+    const dStr = String(day).padStart(2, '0');
+    return `${nextYear}-${mStr}-${dStr}`;
+  }
+
+  /**
+   * Finds the best compatible room for a group:
+   * 1. Same hostel facility
+   * 2. Room capacity matches target group capacity
+   * 3. Has sufficient available spots
+   */
+  static findCompatibleRoom(hostelId: string, capacity: number): Room | null {
+    const db = getDb();
+    const candidate = db.prepare(`
+      SELECT r.*,
+             (SELECT COUNT(*) FROM room_allocations ra WHERE ra.room_id = r.id AND ra.status IN ('HOLD', 'FINALIZED')) as current_occupants
+      FROM rooms r
+      WHERE r.hostel_id = ? AND r.capacity = ? AND r.status != 'MAINTENANCE'
+        AND (r.capacity - (SELECT COUNT(*) FROM room_allocations ra WHERE ra.room_id = r.id AND ra.status IN ('HOLD', 'FINALIZED'))) >= ?
+      ORDER BY r.room_number ASC
+      LIMIT 1
+    `).get(hostelId, capacity, capacity) as any;
+
+    return candidate || null;
+  }
+
+  /**
+   * Finalizes allocation for a complete booking group:
+   * - Checks that all group members have verified payments!
+   * - Selects automatically or uses manager override room.
+   * - Validates room facility and capacity.
+   * - Records 12-month accommodation period starting on chosen start date.
+   * - Mints individual QR credentials for all members!
+   * - Updates room status and group status to 'ALLOCATED'.
+   * - Logs audit trail if override occurred.
+   */
+  static async finalizeGroupAllocation(params: {
+    groupId: string;
+    adminId?: string;
+    overrideRoomId?: string;
+    overrideReason?: string;
+    accommodationStartDate: string; // YYYY-MM-DD
+  }): Promise<{ allocations: RoomAllocation[]; qrCredentials: any[] }> {
+    const db = getDb();
+    const group = BookingGroupService.getGroupById(params.groupId);
+
+    if (!group) {
+      throw new Error(`Booking group ${params.groupId} not found`);
+    }
+
+    if (!group.members || group.members.length !== group.target_capacity) {
+      throw new Error(`Group is incomplete (${group.member_count || 0}/${group.target_capacity} members). All spots must be filled before allocation.`);
+    }
+
+    // CRITICAL: Check every required group member's payment is verified!
+    const unverifiedMembers = group.members.filter(m => !m.payment || m.payment.status !== 'VERIFIED');
+    if (unverifiedMembers.length > 0) {
+      const names = unverifiedMembers.map(m => m.student.full_name).join(', ');
+      throw new Error(`Cannot finalize allocation. Payments for the following group members are not yet verified: ${names}`);
+    }
+
+    // Determine target room
+    let targetRoomId = params.overrideRoomId || group.held_room_id;
+    let isOverride = !!params.overrideRoomId;
+
+    if (!targetRoomId) {
+      const autoRoom = this.findCompatibleRoom(group.hostel_id, group.target_capacity);
+      if (!autoRoom) {
+        throw new Error(`No available compatible room found in ${group.hostel_code} hostel for capacity ${group.target_capacity}.`);
+      }
+      targetRoomId = autoRoom.id;
+    }
+
+    // Validate the target room
+    const targetRoom = db.prepare(`
+      SELECT r.*, h.code as hostel_code 
+      FROM rooms r 
+      JOIN hostels h ON r.hostel_id = h.id 
+      WHERE r.id = ?
+    `).get(targetRoomId) as any;
+
+    if (!targetRoom) {
+      throw new Error('Target room not found');
+    }
+
+    // CRITICAL: Facility Separation Rule
+    if (targetRoom.hostel_id !== group.hostel_id) {
+      throw new Error(`Security Violation: Cannot allocate across facilities. Group is registered in ${group.hostel_code} hostel, but selected room is in ${targetRoom.hostel_code} hostel.`);
+    }
+
+    // CRITICAL: Room Capacity Rule
+    const currentOccupants = db.prepare(`
+      SELECT COUNT(*) as count FROM room_allocations 
+      WHERE room_id = ? AND status IN ('HOLD', 'FINALIZED') AND booking_group_id != ?
+    `).get(targetRoomId, group.id) as any;
+
+    const availableSpots = targetRoom.capacity - (currentOccupants ? currentOccupants.count : 0);
+    if (availableSpots < group.target_capacity) {
+      throw new Error(`Cannot allocate: Room ${targetRoom.room_number} only has ${availableSpots} available spot(s), but group requires ${group.target_capacity}.`);
+    }
+
+    const expiryDate = this.calculateExpiryDate(params.accommodationStartDate);
+    const now = new Date().toISOString();
+    const createdAllocations: RoomAllocation[] = [];
+    const createdQRs: any[] = [];
+
+    // Finalize within synchronous SQLite transaction
+    db.transaction(() => {
+      // Cancel any previous hold allocations for this group
+      db.prepare(`
+        DELETE FROM room_allocations WHERE booking_group_id = ?
+      `).run(group.id);
+
+      for (const member of group.members!) {
+        const allocId = `alloc-${crypto.randomUUID()}`;
+        db.prepare(`
+          INSERT INTO room_allocations (
+            id, room_id, student_id, booking_group_id, status, allocated_by_admin_id,
+            accommodation_start_date, accommodation_end_date, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, 'FINALIZED', ?, ?, ?, ?, ?)
+        `).run(
+          allocId,
+          targetRoomId,
+          member.student_id,
+          group.id,
+          params.adminId || null,
+          params.accommodationStartDate,
+          expiryDate,
+          now,
+          now
+        );
+
+        createdAllocations.push({
+          id: allocId,
+          room_id: targetRoomId,
+          student_id: member.student_id,
+          booking_group_id: group.id,
+          status: 'FINALIZED',
+          allocated_by_admin_id: params.adminId || '',
+          accommodation_start_date: params.accommodationStartDate,
+          accommodation_end_date: expiryDate,
+          created_at: now,
+          updated_at: now
+        });
+      }
+
+      // Update group status
+      db.prepare(`
+        UPDATE booking_groups 
+        SET status = 'ALLOCATED', held_room_id = ?, updated_at = ?
+        WHERE id = ?
+      `).run(targetRoomId, now, group.id);
+
+      // Check if room is fully occupied now
+      const totalOccupants = db.prepare(`
+        SELECT COUNT(*) as count FROM room_allocations WHERE room_id = ? AND status = 'FINALIZED'
+      `).get(targetRoomId) as any;
+
+      if (totalOccupants && totalOccupants.count >= targetRoom.capacity) {
+        db.prepare('UPDATE rooms SET status = \'OCCUPIED\', updated_at = ? WHERE id = ?').run(now, targetRoomId);
+      }
+    })();
+
+    // Issue individual cryptographic QR credential for all members
+    for (const alloc of createdAllocations) {
+      const qrResult = await QRService.getOrIssueCredential(alloc.student_id, alloc.id);
+      createdQRs.push(qrResult);
+    }
+
+    // Audit log
+    AuditService.log({
+      adminId: params.adminId,
+      action: isOverride ? 'ALLOCATE_GROUP_OVERRIDE' : 'ALLOCATE_GROUP_AUTO',
+      entityType: 'BOOKING_GROUP',
+      entityId: group.id,
+      oldValues: { held_room_id: group.held_room_id },
+      newValues: {
+        room_id: targetRoomId,
+        room_number: targetRoom.room_number,
+        start_date: params.accommodationStartDate,
+        end_date: expiryDate,
+        override_reason: params.overrideReason
+      },
+      notes: isOverride
+        ? `Manager manually overrode room to ${targetRoom.room_number}: ${params.overrideReason || 'Administrative decision'}`
+        : `Allocated group ${group.group_code} to compatible room ${targetRoom.room_number}`
+    });
+
+    return { allocations: createdAllocations, qrCredentials: createdQRs };
+  }
+
+  /**
+   * Manager manually moves/reallocates an individual student to another compatible room.
+   * Strictly logs in audit logs!
+   */
+  static reallocateStudent(params: {
+    studentId: string;
+    newRoomId: string;
+    reason: string;
+    adminId?: string;
+  }): RoomAllocation {
+    const db = getDb();
+
+    // Fetch student active allocation
+    const currentAlloc = db.prepare(`
+      SELECT ra.*, r.room_number as current_room_number, r.hostel_id as current_hostel_id,
+             s.full_name, s.gender
+      FROM room_allocations ra
+      JOIN rooms r ON ra.room_id = r.id
+      JOIN students s ON ra.student_id = s.id
+      WHERE ra.student_id = ? AND ra.status = 'FINALIZED'
+    `).get(params.studentId) as any;
+
+    if (!currentAlloc) {
+      throw new Error('Student does not have an active finalized room allocation to move.');
+    }
+
+    // Fetch target room
+    const newRoom = db.prepare(`
+      SELECT r.*, h.code as hostel_code
+      FROM rooms r
+      JOIN hostels h ON r.hostel_id = h.id
+      WHERE r.id = ?
+    `).get(params.newRoomId) as any;
+
+    if (!newRoom) {
+      throw new Error('Target room not found');
+    }
+
+    // Facility check
+    if (newRoom.hostel_id !== currentAlloc.current_hostel_id) {
+      throw new Error(`Facility Separation Error: Cannot move student across ${currentAlloc.gender} hostel facility.`);
+    }
+
+    // Capacity check
+    const currentOccupants = db.prepare(`
+      SELECT COUNT(*) as count FROM room_allocations WHERE room_id = ? AND status = 'FINALIZED'
+    `).get(params.newRoomId) as any;
+
+    if (currentOccupants && currentOccupants.count >= newRoom.capacity) {
+      throw new Error(`Target room ${newRoom.room_number} is already at full capacity (${newRoom.capacity}/${newRoom.capacity}).`);
+    }
+
+    const now = new Date().toISOString();
+
+    db.transaction(() => {
+      // Mark old allocation MOVED
+      db.prepare(`
+        UPDATE room_allocations 
+        SET status = 'MOVED', updated_at = ?
+        WHERE id = ?
+      `).run(now, currentAlloc.id);
+
+      // Create new allocation preserving the original accommodation start and expiry dates!
+      const newAllocId = `alloc-${crypto.randomUUID()}`;
+      db.prepare(`
+        INSERT INTO room_allocations (
+          id, room_id, student_id, booking_group_id, status, allocated_by_admin_id,
+          accommodation_start_date, accommodation_end_date, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'FINALIZED', ?, ?, ?, ?, ?)
+      `).run(
+        newAllocId,
+        params.newRoomId,
+        params.studentId,
+        currentAlloc.booking_group_id,
+        params.adminId || null,
+        currentAlloc.accommodation_start_date,
+        currentAlloc.accommodation_end_date,
+        now,
+        now
+      );
+
+      // Re-link QR credential to new allocation
+      db.prepare(`
+        UPDATE qr_credentials 
+        SET room_allocation_id = ?, updated_at = ?
+        WHERE student_id = ? AND status = 'ACTIVE'
+      `).run(newAllocId, now, params.studentId);
+    })();
+
+    // Audit log
+    AuditService.log({
+      adminId: params.adminId,
+      action: 'REALLOCATE_STUDENT_OVERRIDE',
+      entityType: 'STUDENT',
+      entityId: params.studentId,
+      oldValues: {
+        room_id: currentAlloc.room_id,
+        room_number: currentAlloc.current_room_number
+      },
+      newValues: {
+        room_id: params.newRoomId,
+        room_number: newRoom.room_number,
+        reason: params.reason
+      },
+      notes: `Manager moved student ${currentAlloc.full_name} from ${currentAlloc.current_room_number} to ${newRoom.room_number}. Reason: ${params.reason}`
+    });
+
+    return db.prepare('SELECT * FROM room_allocations WHERE student_id = ? AND status = \'FINALIZED\'').get(params.studentId) as RoomAllocation;
+  }
+}
