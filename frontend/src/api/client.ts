@@ -113,6 +113,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ reason })
     }),
+  getDemoTransactions: (status?: string) => apiRequest<{ transactions: any[] }>(`/payments/demo-transactions${status ? `?status=${status}` : ''}`),
+  reconcileDemoTransaction: (id: string) => apiRequest<any>(`/payments/demo-transactions/${id}/reconcile`, { method: 'POST' }),
+  rejectDemoTransaction: (id: string, reason: string) => apiRequest<any>(`/payments/demo-transactions/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
 
   // Allocation
   finalizeAllocation: (data: { groupId: string; accommodationStartDate: string; overrideRoomId?: string; overrideReason?: string }) =>

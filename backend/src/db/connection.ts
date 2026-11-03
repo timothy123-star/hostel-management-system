@@ -40,6 +40,11 @@ export function initSchema(db: Database.Database) {
   if (!memberColumns.some(column => column.name === 'auto_complete_triple_consent')) {
     db.exec('ALTER TABLE booking_group_members ADD COLUMN auto_complete_triple_consent INTEGER NOT NULL DEFAULT 0 CHECK (auto_complete_triple_consent IN (0, 1))');
   }
+
+  const paymentColumns = db.prepare("PRAGMA table_info(payments)").all() as any[];
+  if (!paymentColumns.some(column => column.name === 'reconciliation_status')) {
+    db.exec("ALTER TABLE payments ADD COLUMN reconciliation_status TEXT NOT NULL DEFAULT 'NOT_SUBMITTED'");
+  }
 }
 
 export function resetDb() {

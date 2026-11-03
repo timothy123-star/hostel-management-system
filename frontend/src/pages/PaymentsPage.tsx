@@ -10,6 +10,7 @@ export const PaymentsPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [search, setSearch] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [transactions, setTransactions] = useState<any[]>([]);
 
   // Actions
   const [verifyingPayment, setVerifyingPayment] = useState<Payment | null>(null);
@@ -23,8 +24,9 @@ export const PaymentsPage: React.FC = () => {
   const loadPayments = async () => {
     setIsLoading(true);
     try {
-      const res = await api.getPayments(statusFilter !== 'ALL' ? statusFilter : undefined);
+      const [res, txnRes] = await Promise.all([api.getPayments(statusFilter !== 'ALL' ? statusFilter : undefined), api.getDemoTransactions()]);
       setPayments(res.payments);
+      setTransactions(txnRes.transactions);
     } catch (err) {
       console.error('Failed to load payments:', err);
     } finally {
@@ -90,6 +92,8 @@ export const PaymentsPage: React.FC = () => {
         </p>
       </div>
 
+      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900"><strong>DEMO reconciliation workspace — NO REAL MONEY.</strong> Incoming records below are synthetic bank transactions. A manager must reconcile an exact payment reference and amount; screenshots or claims are not proof of payment.</div>
+
       {/* Filter Bar */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-4 shadow-sm">
         <div className="relative flex-1 min-w-[280px]">
@@ -117,6 +121,13 @@ export const PaymentsPage: React.FC = () => {
             <option value="REJECTED">Rejected</option>
           </select>
         </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b"><h3 className="font-bold text-sm">Incoming Demo Bank Transactions</h3></div>
+        <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="bg-slate-50 text-slate-500 uppercase"><tr><th className="p-3">Bank transaction</th><th className="p-3">Payment reference / student</th><th className="p-3">Amount</th><th className="p-3">Beneficiary</th><th className="p-3">Status</th><th className="p-3"></th></tr></thead><tbody>
+          {transactions.map(txn => <tr key={txn.id} className="border-t"><td className="p-3 font-mono">{txn.bank_transaction_reference}<br/><span className="text-slate-400">{new Date(txn.transaction_timestamp).toLocaleString()}</span></td><td className="p-3">{txn.payment_reference}<br/><span className="text-slate-500">{txn.student_name || 'No proposed payment'}</span></td><td className="p-3 font-semibold">${txn.amount} {txn.currency}</td><td className="p-3">{txn.beneficiary_account}</td><td className="p-3"><StatusBadge status={txn.reconciliation_status} size="sm" /><p className="text-rose-600">{txn.exception_reason}</p></td><td className="p-3 text-right">{txn.reconciliation_status === 'PENDING_RECONCILIATION' && <div className="flex gap-1 justify-end"><button onClick={async () => { try { await api.reconcileDemoTransaction(txn.id); await loadPayments(); } catch (e: any) { alert(e.message); await loadPayments(); } }} className="px-2 py-1 bg-emerald-600 text-white rounded">Reconcile & Verify</button><button onClick={async () => { const reason = window.prompt('Exception/rejection reason'); if (reason) { await api.rejectDemoTransaction(txn.id, reason); await loadPayments(); } }} className="px-2 py-1 bg-slate-100 rounded">Flag</button></div>}</td></tr>)}
+        </tbody></table></div>
       </div>
 
       {/* Table */}

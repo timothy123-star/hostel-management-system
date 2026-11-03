@@ -12,7 +12,8 @@ export class HostelService {
   static getRooms(hostelCode?: HostelCode): Room[] {
     const db = getDb();
     let query = `
-      SELECT r.*, h.code as hostel_code, h.name as hostel_name
+      SELECT r.*, h.code as hostel_code, h.name as hostel_name,
+             (SELECT bg.id FROM booking_groups bg WHERE bg.held_room_id = r.id AND bg.status IN ('FORMING', 'READY_FOR_ALLOCATION') LIMIT 1) as held_by_group_id
       FROM rooms r
       JOIN hostels h ON r.hostel_id = h.id
     `;

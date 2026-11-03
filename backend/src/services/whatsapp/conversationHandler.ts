@@ -4,6 +4,7 @@ import { WhatsAppService } from './whatsappService.js';
 import { StudentService } from '../studentService.js';
 import { BookingGroupService } from '../bookingGroupService.js';
 import { QRService } from '../qrService.js';
+import { PaymentService } from '../paymentService.js';
 import { WhatsAppState, RoomCapacity, HostelCode } from '@hostel/shared';
 import { config } from '../../config.js';
 
@@ -183,6 +184,17 @@ export class ConversationHandler {
     }
 
     await provider.sendTextMessage(phone, text);
+    if (payment?.status === 'PENDING' && group?.provisional_room) {
+      await provider.sendQuickReplyButtons(phone, 'View your individual DEMO payment instructions. No real money is involved.', [{ id: 'btn_payment_instructions', title: 'Payment instructions' }]);
+    }
+  }
+
+  static async handlePaymentInstructions(phone: string) {
+    const provider = WhatsAppService.getProvider();
+    try {
+      const { payment, bank, demoWarning } = PaymentService.getStudentInstructions(phone);
+      await provider.sendQuickReplyButtons(phone, `💳 *INDIVIDUAL ACCOMMODATION PAYMENT INSTRUCTIONS*\n\nStudent: *${payment.full_name}*\nFacility: *${payment.hostel_name}*\nTemporary Room Hold: *${payment.room_number}* (${payment.capacity}-person)\nAmount: *$${payment.amount} ${payment.currency} (DEMO price)*\nPayment Reference: *${payment.reference_code}*\nStatus: *${payment.reconciliation_status || payment.status}*\n\nBank: *${bank.name}*\nAccount Name: *${bank.accountName}*\nAccount Number: *${bank.accountNumber}*\n\n⚠️ *${demoWarning}*`, [{ id: 'btn_simulate_bank_transfer', title: 'SIMULATE BANK TRANSFER' }]);
+    } catch (err: any) { await provider.sendTextMessage(phone, `⚠️ ${err.message}`); }
   }
 
   /**
@@ -235,6 +247,19 @@ export class ConversationHandler {
 
     if (buttonId === 'btn_view_booking' || upperText === 'STATUS' || upperText === 'VIEW') {
       await this.handleViewBooking(phone);
+      return;
+    }
+
+    if (buttonId === 'btn_payment_instructions' || upperText === 'PAYMENT') {
+      await this.handlePaymentInstructions(phone);
+      return;
+    }
+
+    if (buttonId === 'btn_simulate_bank_transfer') {
+      try {
+        const txn = PaymentService.simulateBankTransfer(phone);
+        await provider.sendTextMessage(phone, `✅ *DEMO TRANSFER RECORDED — NO REAL MONEY*\n\nYour demo transfer has been recorded and is awaiting hostel payment verification.\n\nSimulated bank receipt: *${txn.bank_transaction_reference}*\nPayment reference: *${txn.payment_reference}*\nAmount: $${txn.amount} ${txn.currency}`);
+      } catch (err: any) { await provider.sendTextMessage(phone, `⚠️ ${err.message}`); }
       return;
     }
 

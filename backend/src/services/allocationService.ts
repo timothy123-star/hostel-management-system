@@ -347,6 +347,8 @@ export class AllocationService {
     if (!group || group.status !== 'ALLOCATED' || !group.members?.length) throw new Error('Only finalized groups can be relocated.');
     const newRoom = db.prepare('SELECT * FROM rooms WHERE id = ?').get(params.newRoomId) as any;
     if (!newRoom || newRoom.status === 'MAINTENANCE') throw new Error('Target room is unavailable or under maintenance.');
+    const heldByOther = db.prepare("SELECT id FROM booking_groups WHERE held_room_id = ? AND id != ? AND status IN ('FORMING', 'READY_FOR_ALLOCATION')").get(params.newRoomId, params.groupId);
+    if (heldByOther) throw new Error('Target room is temporarily held for another eligible group.');
     if (newRoom.hostel_id !== group.hostel_id || newRoom.capacity !== group.target_capacity) throw new Error('Target room must be in the same facility and match the group occupancy.');
     const occupants = db.prepare("SELECT COUNT(*) as count FROM room_allocations WHERE room_id = ? AND status = 'FINALIZED'").get(params.newRoomId) as any;
     if (occupants.count + group.members.length > newRoom.capacity) throw new Error('Target room does not have enough physical capacity for the full group.');

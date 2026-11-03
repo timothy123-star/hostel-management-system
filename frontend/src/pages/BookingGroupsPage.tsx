@@ -23,6 +23,7 @@ export const BookingGroupsPage: React.FC = () => {
   const [relocatingGroup, setRelocatingGroup] = useState<BookingGroup | null>(null);
   const [relocationRoomId, setRelocationRoomId] = useState('');
   const [relocationReason, setRelocationReason] = useState('');
+  const [relocationAvailabilityMessage, setRelocationAvailabilityMessage] = useState('');
 
   const loadGroups = async () => {
     setIsLoading(true);
@@ -89,8 +90,9 @@ export const BookingGroupsPage: React.FC = () => {
   const openGroupRelocation = async (group: BookingGroup) => {
     setRelocatingGroup(group); setRelocationReason('');
     const res = await api.getRooms(group.hostel_code);
-    const candidates = res.rooms.filter(room => room.id !== group.held_room_id && room.capacity === group.target_capacity && room.status !== 'MAINTENANCE' && (room.current_occupants || 0) === 0);
+    const candidates = res.rooms.filter(room => room.id !== group.held_room_id && room.capacity === group.target_capacity && room.status === 'AVAILABLE' && !room.held_by_group_id && (room.current_occupants || 0) === 0);
     setAvailableRooms(candidates); setRelocationRoomId(candidates[0]?.id || '');
+    setRelocationAvailabilityMessage(candidates.length ? '' : `No eligible empty ${group.target_capacity === 1 ? 'single' : group.target_capacity === 2 ? 'double' : 'triple'} rooms are currently available in this facility. Rooms must be AVAILABLE, empty, unheld, and match the group capacity exactly.`);
   };
 
   const submitGroupRelocation = async (event: React.FormEvent) => {
@@ -332,6 +334,7 @@ export const BookingGroupsPage: React.FC = () => {
           <select value={relocationRoomId} onChange={e => setRelocationRoomId(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" required>
             {availableRooms.map(room => <option key={room.id} value={room.id}>Room {room.room_number} — {room.capacity} beds, ${room.price_per_student}/student</option>)}
           </select>
+          {relocationAvailabilityMessage && <p className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">{relocationAvailabilityMessage}</p>}
           <input value={relocationReason} onChange={e => setRelocationReason(e.target.value)} placeholder="Documented manager reason" className="w-full px-3 py-2 border rounded-xl text-sm" required />
           <button disabled={!relocationRoomId || relocationReason.trim().length < 3} className="w-full py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold disabled:opacity-50">Confirm whole-group relocation</button>
         </form>

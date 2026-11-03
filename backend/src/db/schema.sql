@@ -109,11 +109,34 @@ CREATE TABLE IF NOT EXISTS payments (
   verified_by_admin_id TEXT REFERENCES admin_users(id) ON DELETE SET NULL,
   verified_at TEXT,
   notes TEXT,
+  reconciliation_status TEXT NOT NULL DEFAULT 'NOT_SUBMITTED' CHECK (reconciliation_status IN ('NOT_SUBMITTED', 'AWAITING_RECONCILIATION', 'RECONCILED', 'EXCEPTION', 'REJECTED')),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(student_id, booking_group_id)
 );
 CREATE INDEX IF NOT EXISTS idx_payments_group ON payments(booking_group_id, status);
+
+-- 8b. DEMO ONLY incoming bank ledger. This is intentionally provider-separated.
+CREATE TABLE IF NOT EXISTS demo_bank_transactions (
+  id TEXT PRIMARY KEY,
+  provider_type TEXT NOT NULL DEFAULT 'DEMO_BANK',
+  bank_transaction_reference TEXT NOT NULL UNIQUE,
+  beneficiary_account TEXT NOT NULL,
+  payment_reference TEXT NOT NULL,
+  amount REAL NOT NULL CHECK (amount >= 0),
+  currency TEXT NOT NULL DEFAULT 'USD',
+  transaction_timestamp TEXT NOT NULL,
+  sender_description TEXT NOT NULL,
+  reconciliation_status TEXT NOT NULL DEFAULT 'PENDING_RECONCILIATION' CHECK (reconciliation_status IN ('PENDING_RECONCILIATION', 'RECONCILED', 'EXCEPTION', 'REJECTED')),
+  linked_payment_id TEXT UNIQUE REFERENCES payments(id) ON DELETE RESTRICT,
+  reconciled_at TEXT,
+  reconciled_by_admin_id TEXT REFERENCES admin_users(id) ON DELETE SET NULL,
+  exception_reason TEXT,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_demo_bank_transactions_status ON demo_bank_transactions(reconciliation_status, created_at);
 
 -- 9. Room Allocations
 CREATE TABLE IF NOT EXISTS room_allocations (

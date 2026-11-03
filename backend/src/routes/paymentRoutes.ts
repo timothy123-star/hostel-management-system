@@ -16,6 +16,24 @@ paymentRouter.get('/', (req, res, next) => {
   }
 });
 
+paymentRouter.get('/demo-transactions', (req, res, next) => {
+  try { res.json({ transactions: PaymentService.getDemoTransactions(req.query.status as string) }); }
+  catch (err) { next(err); }
+});
+
+paymentRouter.post('/demo-transactions/:id/reconcile', (req: AuthenticatedRequest, res, next) => {
+  try { res.json({ payment: PaymentService.reconcileDemoTransaction(req.params.id, req.admin?.id) }); }
+  catch (err) { next(err); }
+});
+
+paymentRouter.post('/demo-transactions/:id/reject', (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!req.body.reason || String(req.body.reason).trim().length < 3) throw new Error('A rejection reason is required.');
+    PaymentService.rejectDemoTransaction(req.params.id, String(req.body.reason).trim(), req.admin?.id);
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
 paymentRouter.post('/:id/verify', authMiddleware, (req: AuthenticatedRequest, res, next) => {
   try {
     const input = VerifyPaymentSchema.parse(req.body);

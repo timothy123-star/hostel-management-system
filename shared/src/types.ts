@@ -6,6 +6,7 @@ export type BookingGroupStatus = 'FORMING' | 'READY_FOR_ALLOCATION' | 'ALLOCATED
 export type GroupMemberRole = 'LEADER' | 'MEMBER';
 export type MatchingQueueStatus = 'WAITING' | 'MATCHED' | 'CANCELLED';
 export type PaymentStatus = 'PENDING' | 'VERIFIED' | 'REJECTED';
+export type ReconciliationStatus = 'NOT_SUBMITTED' | 'AWAITING_RECONCILIATION' | 'RECONCILED' | 'EXCEPTION' | 'REJECTED';
 export type AllocationStatus = 'HOLD' | 'FINALIZED' | 'CANCELLED' | 'MOVED';
 export type QRStatus = 'ACTIVE' | 'REVOKED' | 'EXPIRED';
 export type AccessOutcome = 'GRANTED' | 'DENIED';
@@ -41,6 +42,7 @@ export interface Room {
   status: RoomStatus;
   current_occupants?: number;
   available_spots?: number;
+  held_by_group_id?: string | null;
   occupant_students?: {
     id: string;
     full_name: string;
@@ -125,11 +127,29 @@ export interface Payment {
   verified_by_admin_id?: string | null;
   verified_at?: string | null;
   notes?: string | null;
+  reconciliation_status?: ReconciliationStatus;
   created_at: string;
   updated_at: string;
   student_name?: string;
   student_phone?: string;
   group_code?: string;
+}
+
+export interface DemoBankTransaction {
+  id: string;
+  provider_type: 'DEMO_BANK';
+  bank_transaction_reference: string;
+  beneficiary_account: string;
+  payment_reference: string;
+  amount: number;
+  currency: string;
+  transaction_timestamp: string;
+  sender_description: string;
+  reconciliation_status: 'PENDING_RECONCILIATION' | 'RECONCILED' | 'EXCEPTION' | 'REJECTED';
+  linked_payment_id?: string | null;
+  exception_reason?: string | null;
+  student_name?: string;
+  expected_amount?: number;
 }
 
 export interface RoomAllocation {
