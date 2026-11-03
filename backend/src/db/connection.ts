@@ -53,6 +53,22 @@ export function initSchema(db: Database.Database) {
   if (!studentColumns.some(column => column.name === 'photo_status')) {
     db.exec("ALTER TABLE students ADD COLUMN photo_status TEXT NOT NULL DEFAULT 'NOT_SUBMITTED'");
   }
+
+  // Preserve already-uploaded photographs when upgrading from the first photo
+  // upload milestone into the review-history model.
+  db.exec(`
+    INSERT OR IGNORE INTO student_photo_submissions (id, student_id, storage_key, mime_type, status, submitted_at)
+    SELECT 'legacy-photo-' || id, id, photo_storage_key,
+      CASE
+        WHEN photo_storage_key LIKE '%.png' THEN 'image/png'
+        WHEN photo_storage_key LIKE '%.webp' THEN 'image/webp'
+        ELSE 'image/jpeg'
+      END,
+      CASE WHEN photo_status IN ('APPROVED', 'REJECTED') THEN photo_status ELSE 'PENDING_REVIEW' END,
+      updated_at
+    FROM students
+    WHERE photo_storage_key IS NOT NULL
+  `);
 }
 
 export function resetDb() {

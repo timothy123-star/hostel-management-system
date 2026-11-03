@@ -81,6 +81,11 @@ export const api = {
     body: JSON.stringify(data)
   }),
   issueStudentPhotoUploadLink: (studentId: string) => apiRequest<{ upload_url: string; expires_at: string; delivery: 'SIMULATED' }>(`/students/${studentId}/photo-upload-link`, { method: 'POST' }),
+  getPhotoReviews: (status = 'PENDING_REVIEW') => apiRequest<{ reviews: any[] }>(`/photo-reviews?status=${encodeURIComponent(status)}`),
+  getPhotoReviewHistory: (studentId: string) => apiRequest<{ history: any[] }>(`/photo-reviews/${studentId}/history`),
+  approvePhoto: (studentId: string) => apiRequest<{ review: any }>(`/photo-reviews/${studentId}/approve`, { method: 'POST' }),
+  rejectPhoto: (studentId: string, reason: string) => apiRequest<{ review: any }>(`/photo-reviews/${studentId}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  requestReplacementPhoto: (studentId: string) => apiRequest<{ upload_url: string; expires_at: string }>(`/photo-reviews/${studentId}/request-replacement`, { method: 'POST' }),
 
   // Booking Groups & Queue
   getBookingGroups: (hostel?: string, status?: string) => {

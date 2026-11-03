@@ -172,8 +172,13 @@ export class StudentService {
       SELECT * FROM qr_credentials WHERE student_id = ? ORDER BY created_at DESC LIMIT 1
     `).get(studentId) as any;
 
+    const currentPhoto = db.prepare(`
+      SELECT status FROM student_photo_submissions WHERE student_id = ? ORDER BY submitted_at DESC LIMIT 1
+    `).get(studentId) as any;
+
     return {
       ...student,
+      photo_status: currentPhoto?.status || student.photo_status,
       current_group,
       current_allocation,
       payment,

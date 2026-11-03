@@ -13,7 +13,8 @@ import {
   History,
   MessageSquare,
   LogOut,
-  ShieldCheck
+  ShieldCheck,
+  Camera
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.js';
 
@@ -32,6 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPath, onNavigate, onOpe
     { path: '/female-hostel', label: 'Female Hostel', icon: Building, color: 'text-rose-600' },
     { path: '/rooms', label: 'Room Inventory', icon: Bed },
     { path: '/students', label: 'Student Directory', icon: Users },
+    { path: '/photo-reviews', label: 'Photograph Reviews', icon: Camera },
     { path: '/groups', label: 'Booking Groups', icon: UserCheck },
     { path: '/matching-queue', label: 'Matching Queue', icon: Users },
     { path: '/payments', label: 'Payments & Approvals', icon: CreditCard },

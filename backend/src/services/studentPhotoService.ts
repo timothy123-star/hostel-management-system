@@ -70,6 +70,7 @@ export class StudentPhotoService {
     const db = getDb();
     const link = this.getUsableLink(rawToken);
     const storageKey = `${crypto.randomUUID()}.${type.extension}`;
+    const submissionId = `photo-submission-${crypto.randomUUID()}`;
     const storageDir = config.photoStorageDir;
     const storagePath = path.resolve(storageDir, storageKey);
     if (path.dirname(storagePath) !== path.resolve(storageDir)) throw new Error('Invalid storage path.');
@@ -83,13 +84,81 @@ export class StudentPhotoService {
         if (consumed.changes !== 1) throw new Error('This upload link is no longer valid.');
         db.prepare(`UPDATE students SET photo_storage_key = ?, photo_status = 'PENDING_REVIEW', updated_at = ? WHERE id = ?`)
           .run(storageKey, now, link.student_id);
+        db.prepare(`INSERT INTO student_photo_submissions (id, student_id, storage_key, mime_type, status, submitted_at)
+          VALUES (?, ?, ?, ?, 'PENDING_REVIEW', ?)`)
+          .run(submissionId, link.student_id, storageKey, type.mimeType, now);
       })();
     } catch (error) {
       fs.rmSync(storagePath, { force: true });
       throw error;
     }
-    AuditService.log({ action: 'SUBMIT_STUDENT_PHOTO', entityType: 'STUDENT', entityId: link.student_id, newValues: { photo_status: 'PENDING_REVIEW' }, notes: 'Photograph submitted and awaiting management review.' });
+    AuditService.log({ action: 'SUBMIT_STUDENT_PHOTO', entityType: 'STUDENT', entityId: link.student_id, newValues: { photo_status: 'PENDING_REVIEW', submission_id: submissionId }, notes: 'Photograph submitted and awaiting management review.' });
     return { status: 'PENDING_REVIEW', mimeType: type.mimeType };
+  }
+
+  static getReviewQueue(status = 'PENDING_REVIEW') {
+    if (!['PENDING_REVIEW', 'APPROVED', 'REJECTED'].includes(status)) throw new Error('Invalid photograph review status.');
+    return getDb().prepare(`
+      SELECT s.id as student_id, s.full_name, s.phone_number, s.department, s.academic_level, s.gender,
+             ps.status as photo_status, ps.id as submission_id, ps.submitted_at, ps.reviewed_at, ps.rejection_reason,
+             reviewer.full_name as reviewer_name, r.room_number
+      FROM students s
+      JOIN student_photo_submissions ps ON ps.storage_key = s.photo_storage_key
+      LEFT JOIN admin_users reviewer ON reviewer.id = ps.reviewed_by_admin_id
+      LEFT JOIN room_allocations ra ON ra.student_id = s.id AND ra.status = 'FINALIZED'
+      LEFT JOIN rooms r ON r.id = ra.room_id
+      WHERE ps.status = ?
+      ORDER BY ps.submitted_at ASC
+    `).all(status);
+  }
+
+  static getPhotoForManager(studentId: string) {
+    const photo = getDb().prepare(`SELECT ps.storage_key, ps.mime_type FROM students s
+      JOIN student_photo_submissions ps ON ps.storage_key = s.photo_storage_key
+      WHERE s.id = ?`).get(studentId) as any;
+    if (!photo) throw new Error('No submitted photograph was found for this student.');
+    const storagePath = path.resolve(config.photoStorageDir, photo.storage_key);
+    if (path.dirname(storagePath) !== path.resolve(config.photoStorageDir) || !fs.existsSync(storagePath)) {
+      throw new Error('Submitted photograph is unavailable.');
+    }
+    return { storagePath, mimeType: photo.mime_type };
+  }
+
+  static reviewPhoto(studentId: string, decision: 'APPROVED' | 'REJECTED', adminId: string, rejectionReason?: string) {
+    if (decision === 'REJECTED' && !rejectionReason?.trim()) throw new Error('A rejection reason is required.');
+    const db = getDb();
+    const current = db.prepare(`SELECT s.photo_storage_key, ps.id, ps.status FROM students s
+      JOIN student_photo_submissions ps ON ps.storage_key = s.photo_storage_key
+      WHERE s.id = ?`).get(studentId) as any;
+    if (!current || current.status !== 'PENDING_REVIEW') throw new Error('Only a currently pending photograph can be reviewed.');
+    const now = new Date().toISOString();
+    db.transaction(() => {
+      const changed = db.prepare(`UPDATE student_photo_submissions
+        SET status = ?, reviewed_by_admin_id = ?, reviewed_at = ?, rejection_reason = ?
+        WHERE id = ? AND status = 'PENDING_REVIEW'`).run(decision, adminId, now, decision === 'REJECTED' ? rejectionReason!.trim() : null, current.id);
+      if (changed.changes !== 1) throw new Error('Only a currently pending photograph can be reviewed.');
+      // The submission is the authoritative review state. Keep the legacy
+      // current-photo field at PENDING_REVIEW for old SQLite databases whose
+      // CHECK constraint predates approval/rejection states.
+      db.prepare('UPDATE students SET updated_at = ? WHERE id = ?').run(now, studentId);
+    })();
+    AuditService.log({ adminId, action: decision === 'APPROVED' ? 'APPROVE_STUDENT_PHOTO' : 'REJECT_STUDENT_PHOTO', entityType: 'STUDENT', entityId: studentId, oldValues: { photo_status: 'PENDING_REVIEW' }, newValues: { photo_status: decision }, notes: decision === 'REJECTED' ? rejectionReason!.trim() : 'Photograph approved by manager.' });
+    return { status: decision, reviewedAt: now };
+  }
+
+  static getReviewHistory(studentId: string) {
+    return getDb().prepare(`SELECT ps.id, ps.status, ps.submitted_at, ps.reviewed_at, ps.rejection_reason,
+      reviewer.full_name as reviewer_name
+      FROM student_photo_submissions ps
+      LEFT JOIN admin_users reviewer ON reviewer.id = ps.reviewed_by_admin_id
+      WHERE ps.student_id = ? ORDER BY ps.submitted_at ASC`).all(studentId);
+  }
+
+  static authorizeReplacement(studentId: string, adminId: string) {
+    const student = getDb().prepare(`SELECT ps.status FROM students s
+      JOIN student_photo_submissions ps ON ps.storage_key = s.photo_storage_key WHERE s.id = ?`).get(studentId) as any;
+    if (!student || student.status !== 'REJECTED') throw new Error('Only a rejected photograph can be authorized for replacement.');
+    return this.issueUploadLink(studentId, adminId);
   }
 
   private static getUsableLink(rawToken: string): any {

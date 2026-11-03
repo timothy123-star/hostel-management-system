@@ -15,7 +15,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
     colorClasses = 'bg-emerald-50 text-emerald-700 border-emerald-200';
   }
   // Amber / Pending / Warning
-  else if (['PENDING', 'HOLD', 'FORMING', 'WAITING', 'QUEUED', 'WARNING_14_DAYS', 'NOTICE_30_DAYS'].includes(s)) {
+  else if (['PENDING', 'PENDING_REVIEW', 'HOLD', 'FORMING', 'WAITING', 'QUEUED', 'WARNING_14_DAYS', 'NOTICE_30_DAYS'].includes(s)) {
     colorClasses = 'bg-amber-50 text-amber-700 border-amber-200';
   }
   // Blue / Info / Ready

@@ -50,12 +50,28 @@ CREATE TABLE IF NOT EXISTS students (
   consent_random_matching INTEGER NOT NULL DEFAULT 0 CHECK (consent_random_matching IN (0, 1)),
   photo_url TEXT,
   photo_storage_key TEXT,
-  photo_status TEXT NOT NULL DEFAULT 'NOT_SUBMITTED' CHECK (photo_status IN ('NOT_SUBMITTED', 'PENDING_REVIEW')),
+  photo_status TEXT NOT NULL DEFAULT 'NOT_SUBMITTED' CHECK (photo_status IN ('NOT_SUBMITTED', 'PENDING_REVIEW', 'APPROVED', 'REJECTED')),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_students_phone ON students(phone_number);
 CREATE INDEX IF NOT EXISTS idx_students_gender ON students(gender);
+
+-- Every submitted image is retained for the manager review history. The current
+-- student photo fields point to the most recent submission only.
+CREATE TABLE IF NOT EXISTS student_photo_submissions (
+  id TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  storage_key TEXT NOT NULL UNIQUE,
+  mime_type TEXT NOT NULL CHECK (mime_type IN ('image/jpeg', 'image/png', 'image/webp')),
+  status TEXT NOT NULL DEFAULT 'PENDING_REVIEW' CHECK (status IN ('PENDING_REVIEW', 'APPROVED', 'REJECTED')),
+  submitted_at TEXT NOT NULL DEFAULT (datetime('now')),
+  reviewed_by_admin_id TEXT REFERENCES admin_users(id) ON DELETE SET NULL,
+  reviewed_at TEXT,
+  rejection_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_photo_submissions_review ON student_photo_submissions(status, submitted_at);
+CREATE INDEX IF NOT EXISTS idx_photo_submissions_student ON student_photo_submissions(student_id, submitted_at);
 
 -- Secure, single-use links. Raw tokens are never persisted.
 CREATE TABLE IF NOT EXISTS student_photo_upload_links (

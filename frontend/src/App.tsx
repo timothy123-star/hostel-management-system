@@ -16,6 +16,7 @@ import { ReportsPage } from './pages/ReportsPage.js';
 import { AuditLogsPage } from './pages/AuditLogsPage.js';
 import { WhatsAppSimulatorPage } from './pages/WhatsAppSimulatorPage.js';
 import { StudentPhotoUploadPage } from './pages/StudentPhotoUploadPage.js';
+import { PhotoReviewsPage } from './pages/PhotoReviewsPage.js';
 
 function DashboardRouter() {
   const { user, isLoading } = useAuth();
@@ -72,6 +73,8 @@ function DashboardRouter() {
         return <RoomsInventoryPage />;
       case '/students':
         return <StudentsPage />;
+      case '/photo-reviews':
+        return <PhotoReviewsPage />;
       case '/groups':
         return <BookingGroupsPage />;
       case '/matching-queue':
