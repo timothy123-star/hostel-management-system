@@ -49,11 +49,26 @@ CREATE TABLE IF NOT EXISTS students (
   roommate_mode TEXT NOT NULL CHECK (roommate_mode IN ('KNOWN', 'RANDOM')),
   consent_random_matching INTEGER NOT NULL DEFAULT 0 CHECK (consent_random_matching IN (0, 1)),
   photo_url TEXT,
+  photo_storage_key TEXT,
+  photo_status TEXT NOT NULL DEFAULT 'NOT_SUBMITTED' CHECK (photo_status IN ('NOT_SUBMITTED', 'PENDING_REVIEW')),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_students_phone ON students(phone_number);
 CREATE INDEX IF NOT EXISTS idx_students_gender ON students(gender);
+
+-- Secure, single-use links. Raw tokens are never persisted.
+CREATE TABLE IF NOT EXISTS student_photo_upload_links (
+  id TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  invalidated_at TEXT,
+  created_by_admin_id TEXT NOT NULL REFERENCES admin_users(id) ON DELETE RESTRICT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_photo_upload_links_student ON student_photo_upload_links(student_id, expires_at);
 
 -- 5. Booking Groups
 CREATE TABLE IF NOT EXISTS booking_groups (

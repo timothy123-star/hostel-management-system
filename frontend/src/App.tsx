@@ -15,6 +15,7 @@ import { AnnouncementsPage } from './pages/AnnouncementsPage.js';
 import { ReportsPage } from './pages/ReportsPage.js';
 import { AuditLogsPage } from './pages/AuditLogsPage.js';
 import { WhatsAppSimulatorPage } from './pages/WhatsAppSimulatorPage.js';
+import { StudentPhotoUploadPage } from './pages/StudentPhotoUploadPage.js';
 
 function DashboardRouter() {
   const { user, isLoading } = useAuth();
@@ -51,6 +52,9 @@ function DashboardRouter() {
   if (currentPath === '/demo/whatsapp') {
     return <WhatsAppSimulatorPage />;
   }
+
+  const photoUploadMatch = currentPath.match(/^\/photo-upload\/([A-Za-z0-9_-]+)$/);
+  if (photoUploadMatch) return <StudentPhotoUploadPage token={photoUploadMatch[1]} />;
 
   if (!user) {
     return <LoginPage />;

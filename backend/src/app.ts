@@ -12,6 +12,7 @@ import { announcementRouter } from './routes/announcementRoutes.js';
 import { statsRouter } from './routes/statsRoutes.js';
 import { auditRouter } from './routes/auditRoutes.js';
 import { whatsappRouter } from './routes/whatsappRoutes.js';
+import { studentPhotoRouter } from './routes/studentPhotoRoutes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 export function createApp() {
@@ -47,6 +48,7 @@ export function createApp() {
   app.use('/api/reports', statsRouter);
   app.use('/api/audit-logs', auditRouter);
   app.use('/api/whatsapp', whatsappRouter);
+  app.use('/api', studentPhotoRouter);
 
   // Centralized error handler
   app.use(errorHandler);

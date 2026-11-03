@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api/client.js';
 import { Student, Room } from '@hostel/shared';
-import { Users, Search, Filter, QrCode, CreditCard, ArrowRight, Bed, Eye, RefreshCw, AlertCircle } from 'lucide-react';
+import { Users, Search, Filter, QrCode, CreditCard, ArrowRight, Bed, Eye, RefreshCw, AlertCircle, Camera } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge.js';
 import { Modal } from '../components/Modal.js';
 
@@ -22,6 +22,7 @@ export const StudentsPage: React.FC = () => {
   const [reallocateReason, setReallocateReason] = useState('');
   const [reallocError, setReallocError] = useState<string | null>(null);
   const [isSubmittingRealloc, setIsSubmittingRealloc] = useState(false);
+  const [photoLinkMessage, setPhotoLinkMessage] = useState<string | null>(null);
 
   const loadStudents = async () => {
     setIsLoading(true);
@@ -96,6 +97,15 @@ export const StudentsPage: React.FC = () => {
     } finally {
       setIsSubmittingRealloc(false);
     }
+  };
+
+  const issuePhotoLink = async () => {
+    if (!selectedStudent) return;
+    setPhotoLinkMessage(null);
+    try {
+      const result = await api.issueStudentPhotoUploadLink(selectedStudent.id);
+      setPhotoLinkMessage(`Secure link sent through the WhatsApp simulator. It expires ${new Date(result.expires_at).toLocaleTimeString()}.`);
+    } catch (error: any) { setPhotoLinkMessage(error.message || 'Could not issue photo upload link.'); }
   };
 
   return (
@@ -319,6 +329,12 @@ export const StudentsPage: React.FC = () => {
               ) : (
                 <p className="text-xs text-slate-500 italic">No room allocated yet. Awaiting group completion and payment verification.</p>
               )}
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between gap-3"><div><h4 className="font-bold text-sm text-slate-900 flex items-center gap-2"><Camera className="w-4 h-4 text-slate-500" /> Resident photograph</h4><p className="text-xs text-slate-500 mt-1">Status: {selectedStudent.photo_status?.replace(/_/g, ' ') || 'NOT SUBMITTED'}</p></div>
+                <button onClick={issuePhotoLink} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-medium">Send secure upload link</button></div>
+              {photoLinkMessage && <p className="text-xs rounded-lg border border-sky-200 bg-sky-50 p-2 text-sky-800">{photoLinkMessage}</p>}
             </div>
 
             {/* Reallocation Form (Inline in modal) */}

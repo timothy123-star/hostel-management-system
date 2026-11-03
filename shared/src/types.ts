@@ -9,6 +9,7 @@ export type PaymentStatus = 'PENDING' | 'VERIFIED' | 'REJECTED';
 export type ReconciliationStatus = 'NOT_SUBMITTED' | 'AWAITING_RECONCILIATION' | 'RECONCILED' | 'EXCEPTION' | 'REJECTED';
 export type AllocationStatus = 'HOLD' | 'FINALIZED' | 'CANCELLED' | 'MOVED';
 export type QRStatus = 'ACTIVE' | 'REVOKED' | 'EXPIRED';
+export type StudentPhotoStatus = 'NOT_SUBMITTED' | 'PENDING_REVIEW';
 export type AccessOutcome = 'GRANTED' | 'DENIED';
 export type VerificationMethod = 'CAMERA' | 'MANUAL_ENTRY';
 export type AnnouncementAudience = 'ALL' | 'MALE' | 'FEMALE' | 'EXPIRING_SOON' | 'CUSTOM';
@@ -65,6 +66,7 @@ export interface Student {
   roommate_mode: RoommateMode;
   consent_random_matching: number; // 0 or 1
   photo_url?: string;
+  photo_status?: StudentPhotoStatus;
   created_at: string;
   updated_at: string;
   // Computed / joined fields

@@ -45,6 +45,14 @@ export function initSchema(db: Database.Database) {
   if (!paymentColumns.some(column => column.name === 'reconciliation_status')) {
     db.exec("ALTER TABLE payments ADD COLUMN reconciliation_status TEXT NOT NULL DEFAULT 'NOT_SUBMITTED'");
   }
+
+  const studentColumns = db.prepare("PRAGMA table_info(students)").all() as any[];
+  if (!studentColumns.some(column => column.name === 'photo_storage_key')) {
+    db.exec('ALTER TABLE students ADD COLUMN photo_storage_key TEXT');
+  }
+  if (!studentColumns.some(column => column.name === 'photo_status')) {
+    db.exec("ALTER TABLE students ADD COLUMN photo_status TEXT NOT NULL DEFAULT 'NOT_SUBMITTED'");
+  }
 }
 
 export function resetDb() {

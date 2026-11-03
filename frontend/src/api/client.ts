@@ -80,6 +80,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(data)
   }),
+  issueStudentPhotoUploadLink: (studentId: string) => apiRequest<{ upload_url: string; expires_at: string; delivery: 'SIMULATED' }>(`/students/${studentId}/photo-upload-link`, { method: 'POST' }),
 
   // Booking Groups & Queue
   getBookingGroups: (hostel?: string, status?: string) => {

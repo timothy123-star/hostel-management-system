@@ -17,6 +17,12 @@ export const config = {
   dbPath: process.env.DATABASE_FILE
     ? path.resolve(process.env.DATABASE_FILE)
     : path.resolve(__dirname, '../../hostel.sqlite'),
+  // Deliberately not under a public/static web root. Files are only for a
+  // future authenticated management review flow.
+  photoStorageDir: process.env.PHOTO_STORAGE_DIR
+    ? path.resolve(process.env.PHOTO_STORAGE_DIR)
+    : path.resolve(__dirname, '../../private-uploads/student-photos'),
+  publicAppUrl: (process.env.PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, ''),
   
   meta: {
     accessToken: process.env.META_WHATSAPP_ACCESS_TOKEN || '',
