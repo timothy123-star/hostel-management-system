@@ -22,6 +22,7 @@ export class BookingGroupService {
     studentId: string;
     hostelCode: HostelCode;
     targetCapacity: RoomCapacity;
+    autoCompleteTripleConsent?: boolean;
   }): BookingGroup {
     const db = getDb();
 
@@ -68,15 +69,15 @@ export class BookingGroupService {
 
     db.transaction(() => {
       db.prepare(`
-        INSERT INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(groupId, groupCode, hostel.id, params.targetCapacity, initialStatus, params.studentId, eligibleAt, now, now);
+        INSERT INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, auto_complete_triple_consent, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(groupId, groupCode, hostel.id, params.targetCapacity, initialStatus, params.studentId, eligibleAt, params.autoCompleteTripleConsent ? 1 : 0, now, now);
 
       const memberId = `bgm-${crypto.randomUUID()}`;
       db.prepare(`
-        INSERT INTO booking_group_members (id, group_id, student_id, role, is_matched_from_queue, joined_at)
-        VALUES (?, ?, ?, 'LEADER', 0, ?)
-      `).run(memberId, groupId, params.studentId, now);
+        INSERT INTO booking_group_members (id, group_id, student_id, role, is_matched_from_queue, auto_complete_triple_consent, joined_at)
+        VALUES (?, ?, ?, 'LEADER', 0, ?, ?)
+      `).run(memberId, groupId, params.studentId, params.autoCompleteTripleConsent ? 1 : 0, now);
 
       // Create initial payment record
       const roomPrice = db.prepare('SELECT price_per_student FROM rooms WHERE hostel_id = ? AND capacity = ? LIMIT 1')
@@ -112,7 +113,7 @@ export class BookingGroupService {
   /**
    * Roommate joins an existing booking group with an invite code.
    */
-  static joinGroup(studentId: string, groupCode: string): BookingGroup {
+  static joinGroup(studentId: string, groupCode: string, autoCompleteTripleConsent = false): BookingGroup {
     const db = getDb();
     const cleanCode = groupCode.trim().toUpperCase();
 
@@ -165,9 +166,9 @@ export class BookingGroupService {
     db.transaction(() => {
       const memberId = `bgm-${crypto.randomUUID()}`;
       db.prepare(`
-        INSERT INTO booking_group_members (id, group_id, student_id, role, is_matched_from_queue, joined_at)
-        VALUES (?, ?, ?, 'MEMBER', 0, ?)
-      `).run(memberId, group.id, studentId, now);
+        INSERT INTO booking_group_members (id, group_id, student_id, role, is_matched_from_queue, auto_complete_triple_consent, joined_at)
+        VALUES (?, ?, ?, 'MEMBER', 0, ?, ?)
+      `).run(memberId, group.id, studentId, autoCompleteTripleConsent ? 1 : 0, now);
 
       // Create individual payment record for joining member
       const roomPrice = db.prepare('SELECT price_per_student FROM rooms WHERE hostel_id = ? AND capacity = ? LIMIT 1')
@@ -244,6 +245,7 @@ export class BookingGroupService {
         student_id: m.student_id,
         role: m.role,
         is_matched_from_queue: m.is_matched_from_queue,
+        auto_complete_triple_consent: m.auto_complete_triple_consent,
         joined_at: m.joined_at,
         student: {
           id: m.student_id,

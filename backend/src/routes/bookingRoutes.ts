@@ -37,3 +37,16 @@ bookingRouter.get('/matching-queue', (req, res, next) => {
     next(err);
   }
 });
+
+bookingRouter.post('/matching/run', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+  try { res.json(MatchingService.runMatching(req.body.hostel, req.body.capacity)); }
+  catch (err) { next(err); }
+});
+
+bookingRouter.post('/groups/:id/complete-from-queue', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!req.body.queue_item_id) throw new Error('A queue candidate is required.');
+    MatchingService.completeKnownTripleGroup(req.params.id, req.body.queue_item_id);
+    res.json({ group: BookingGroupService.getGroupById(req.params.id) });
+  } catch (err) { next(err); }
+});

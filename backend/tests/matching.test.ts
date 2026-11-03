@@ -85,4 +85,11 @@ describe('Roommate Groups & Random Matching Queue Rules', () => {
       BookingGroupService.joinGroup(newStudent.student.id, 'GRP-JOHNDOE');
     }).toThrow(/already|maximum capacity/i);
   });
+
+  it('requires both known triple-pair members to agree before consuming a consenting queue student', () => {
+    const leader = StudentService.registerStudent({ full_name: 'Triple Lead', phone_number: '+17773330001', gender: 'MALE', department: 'CS', academic_level: '100 Level', preferred_occupancy: 3, roommate_mode: 'KNOWN', consent_random_matching: false, auto_complete_triple_consent: true });
+    StudentService.registerStudent({ full_name: 'Triple Member', phone_number: '+17773330002', gender: 'MALE', department: 'CS', academic_level: '100 Level', preferred_occupancy: 3, roommate_mode: 'KNOWN', consent_random_matching: false, auto_complete_triple_consent: false, group_invite_code: leader.group.group_code });
+    const queued = StudentService.registerStudent({ full_name: 'Queue Consent', phone_number: '+17773330003', gender: 'MALE', department: 'CS', academic_level: '100 Level', preferred_occupancy: 3, roommate_mode: 'RANDOM', consent_random_matching: true });
+    expect(() => MatchingService.completeKnownTripleGroup(leader.group.id, queued.queueItem.id)).toThrow(/consenting known pair/i);
+  });
 });

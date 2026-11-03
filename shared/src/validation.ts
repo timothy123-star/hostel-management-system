@@ -15,6 +15,7 @@ export const StudentRegistrationSchema = z.object({
   preferred_occupancy: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   roommate_mode: z.enum(['KNOWN', 'RANDOM']),
   consent_random_matching: z.boolean().default(false),
+  auto_complete_triple_consent: z.boolean().default(false),
   group_invite_code: z.string().optional()
 });
 export type StudentRegistrationInput = z.infer<typeof StudentRegistrationSchema>;

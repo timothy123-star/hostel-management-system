@@ -59,12 +59,13 @@ export class MatchingService {
     // 1. Check if there are known pairs requesting a triple room who consented to receiving a 3rd member
     if (capacity === 3) {
       const incompleteGroups = db.prepare(`
-        SELECT bg.id, bg.created_by_student_id, COUNT(bgm.id) as current_count
+        SELECT bg.id, bg.created_by_student_id, COUNT(bgm.id) as current_count,
+               MIN(bgm.auto_complete_triple_consent) as pair_consented
         FROM booking_groups bg
         JOIN booking_group_members bgm ON bg.id = bgm.group_id
         WHERE bg.hostel_id = ? AND bg.target_capacity = 3 AND bg.status = 'FORMING'
         GROUP BY bg.id
-        HAVING current_count = 2
+        HAVING current_count = 2 AND pair_consented = 1
         ORDER BY bg.created_at ASC
       `).all(hostelId) as any[];
 
@@ -86,8 +87,8 @@ export class MatchingService {
 
           db.transaction(() => {
             db.prepare(`
-              INSERT INTO booking_group_members (id, group_id, student_id, role, is_matched_from_queue, joined_at)
-              VALUES (?, ?, ?, 'MEMBER', 1, ?)
+              INSERT INTO booking_group_members (id, group_id, student_id, role, is_matched_from_queue, auto_complete_triple_consent, joined_at)
+              VALUES (?, ?, ?, 'MEMBER', 1, 0, ?)
             `).run(memberId, group.id, nextInQueue.student_id, now);
 
             db.prepare(`
@@ -155,8 +156,8 @@ export class MatchingService {
           const role = i === 0 ? 'LEADER' : 'MEMBER';
 
           db.prepare(`
-            INSERT INTO booking_group_members (id, group_id, student_id, role, is_matched_from_queue, joined_at)
-            VALUES (?, ?, ?, ?, 1, ?)
+            INSERT INTO booking_group_members (id, group_id, student_id, role, is_matched_from_queue, auto_complete_triple_consent, joined_at)
+            VALUES (?, ?, ?, ?, 1, 0, ?)
           `).run(memberId, groupId, item.student_id, role, now);
 
           db.prepare(`
@@ -174,6 +175,51 @@ export class MatchingService {
         }
       })();
     }
+  }
+
+  static runMatching(hostelCode?: HostelCode, capacity?: RoomCapacity) {
+    const db = getDb();
+    const hostels = hostelCode
+      ? db.prepare('SELECT id FROM hostels WHERE code = ?').all(hostelCode) as any[]
+      : db.prepare('SELECT id FROM hostels').all() as any[];
+    let processed = 0;
+    for (const hostel of hostels) {
+      for (const requestedCapacity of (capacity ? [capacity] : [2, 3]) as RoomCapacity[]) {
+        const before = db.prepare("SELECT COUNT(*) as count FROM matching_queue WHERE hostel_id = ? AND target_capacity = ? AND status = 'WAITING'").get(hostel.id, requestedCapacity) as any;
+        this.attemptMatching(hostel.id, requestedCapacity);
+        const after = db.prepare("SELECT COUNT(*) as count FROM matching_queue WHERE hostel_id = ? AND target_capacity = ? AND status = 'WAITING'").get(hostel.id, requestedCapacity) as any;
+        processed += before.count - after.count;
+      }
+    }
+    return { processed };
+  }
+
+  static completeKnownTripleGroup(groupId: string, queueItemId: string): void {
+    const db = getDb();
+    const group = db.prepare(`SELECT bg.*, COUNT(bgm.id) as member_count, MIN(bgm.auto_complete_triple_consent) as pair_consented
+      FROM booking_groups bg JOIN booking_group_members bgm ON bgm.group_id = bg.id WHERE bg.id = ? GROUP BY bg.id`).get(groupId) as any;
+    if (!group || group.status !== 'FORMING' || group.target_capacity !== 3 || group.member_count !== 2 || group.pair_consented !== 1) {
+      throw new Error('Only a consenting known pair forming a triple group can be completed from the queue.');
+    }
+    const selected = db.prepare(`SELECT mq.*, s.consent_random_matching FROM matching_queue mq JOIN students s ON s.id = mq.student_id
+      WHERE mq.id = ? AND mq.status = 'WAITING'`).get(queueItemId) as any;
+    if (!selected || selected.hostel_id !== group.hostel_id || selected.target_capacity !== 3 || selected.consent_random_matching !== 1) {
+      throw new Error('Selected student is not an independently consenting, compatible queue candidate.');
+    }
+    const first = db.prepare("SELECT id FROM matching_queue WHERE hostel_id = ? AND target_capacity = 3 AND status = 'WAITING' ORDER BY queued_at ASC, id ASC LIMIT 1").get(group.hostel_id) as any;
+    if (!first || first.id !== queueItemId) throw new Error('Queue priority requires selecting the earliest compatible student.');
+    const now = new Date().toISOString();
+    db.transaction(() => {
+      db.prepare(`INSERT INTO booking_group_members (id, group_id, student_id, role, is_matched_from_queue, auto_complete_triple_consent, joined_at)
+        VALUES (?, ?, ?, 'MEMBER', 1, 0, ?)`)
+        .run(`bgm-${crypto.randomUUID()}`, groupId, selected.student_id, now);
+      db.prepare("UPDATE matching_queue SET status = 'MATCHED', matched_at = ?, matched_group_id = ? WHERE id = ?").run(now, groupId, queueItemId);
+      db.prepare("UPDATE booking_groups SET status = 'READY_FOR_ALLOCATION', eligible_at = ?, updated_at = ? WHERE id = ?").run(now, now, groupId);
+      const room = db.prepare('SELECT price_per_student FROM rooms WHERE hostel_id = ? AND capacity = 3 LIMIT 1').get(group.hostel_id) as any;
+      db.prepare(`INSERT INTO payments (id, student_id, booking_group_id, amount, currency, status, reference_code, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'USD', 'PENDING', ?, ?, ?)`)
+        .run(`pay-${crypto.randomUUID()}`, selected.student_id, groupId, room?.price_per_student || 600, `REF-${crypto.randomBytes(4).toString('hex').toUpperCase()}`, now, now);
+    })();
   }
 
   /**

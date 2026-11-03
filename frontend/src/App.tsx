@@ -47,6 +47,11 @@ function DashboardRouter() {
     );
   }
 
+  // This is a local student-facing simulator, not the manager dashboard or webhook.
+  if (currentPath === '/demo/whatsapp') {
+    return <WhatsAppSimulatorPage />;
+  }
+
   if (!user) {
     return <LoginPage />;
   }

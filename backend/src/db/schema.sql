@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS booking_groups (
   created_by_student_id TEXT NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
   eligible_at TEXT,
   held_room_id TEXT REFERENCES rooms(id) ON DELETE SET NULL,
+  auto_complete_triple_consent INTEGER NOT NULL DEFAULT 0 CHECK (auto_complete_triple_consent IN (0, 1)),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -77,6 +78,7 @@ CREATE TABLE IF NOT EXISTS booking_group_members (
   student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
   role TEXT NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('LEADER', 'MEMBER')),
   is_matched_from_queue INTEGER NOT NULL DEFAULT 0 CHECK (is_matched_from_queue IN (0, 1)),
+  auto_complete_triple_consent INTEGER NOT NULL DEFAULT 0 CHECK (auto_complete_triple_consent IN (0, 1)),
   joined_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(group_id, student_id)
 );

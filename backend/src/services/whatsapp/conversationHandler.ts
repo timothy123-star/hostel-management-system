@@ -375,6 +375,13 @@ export class ConversationHandler {
       case 'AWAITING_ROOMMATE_CHOICE': {
         if (buttonId === 'mode_known' || upperText.includes('KNOWN')) {
           payload.roommate_mode = 'KNOWN';
+          if (payload.preferred_occupancy === 3) {
+            this.updateConversation(phone, 'AWAITING_AUTO_COMPLETE_CONSENT', payload);
+            await provider.sendQuickReplyButtons(phone,
+              'For a triple room, do you and your known roommate(s) agree that management may complete your pair with the next independently consenting student in the FIFO queue?',
+              [{ id: 'auto_complete_yes', title: 'Yes, we agree' }, { id: 'auto_complete_no', title: 'No, known only' }]);
+            return;
+          }
           this.updateConversation(phone, 'AWAITING_INVITE_CODE', payload);
           await provider.sendTextMessage(
             phone,
@@ -402,6 +409,18 @@ export class ConversationHandler {
         }
 
         await provider.sendTextMessage(phone, 'Please choose *Known Roommates* or *Random Matching*.');
+        return;
+      }
+
+      case 'AWAITING_AUTO_COMPLETE_CONSENT': {
+        if (buttonId === 'auto_complete_yes' || upperText === 'YES') payload.auto_complete_triple_consent = true;
+        else if (buttonId === 'auto_complete_no' || upperText === 'NO') payload.auto_complete_triple_consent = false;
+        else {
+          await provider.sendTextMessage(phone, 'Please reply YES to agree to automatic completion, or NO for known roommates only.');
+          return;
+        }
+        this.updateConversation(phone, 'AWAITING_INVITE_CODE', payload);
+        await provider.sendTextMessage(phone, 'Reply with an invitation code (for example GRP-ABCD), or NEW to create a group.');
         return;
       }
 
@@ -467,6 +486,7 @@ export class ConversationHandler {
         preferred_occupancy: payload.preferred_occupancy,
         roommate_mode: payload.roommate_mode,
         consent_random_matching: !!payload.consent_random_matching,
+        auto_complete_triple_consent: !!payload.auto_complete_triple_consent,
         group_invite_code: payload.group_invite_code
       };
 

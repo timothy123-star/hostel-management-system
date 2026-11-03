@@ -6,6 +6,7 @@ import { BookingGroupService } from '../src/services/bookingGroupService.js';
 import { StudentService } from '../src/services/studentService.js';
 import { PaymentService } from '../src/services/paymentService.js';
 import { runSeed } from '../src/db/seed.js';
+import { getDb } from '../src/db/connection.js';
 
 describe('Room Allocation & Facility Separation Rules', () => {
   beforeEach(async () => {
@@ -103,5 +104,24 @@ describe('Room Allocation & Facility Separation Rules', () => {
     });
 
     expect(result.allocations[0].room_id).toBe('rm-f-103');
+  });
+
+  it('rejects maintenance rooms and rooms held by another group', async () => {
+    const db = getDb();
+    const reg = StudentService.registerStudent({ full_name: 'Integrity Student', phone_number: '+18889990012', gender: 'FEMALE', department: 'Law', academic_level: '200 Level', preferred_occupancy: 1, roommate_mode: 'KNOWN', consent_random_matching: false });
+    const payment = PaymentService.getPayments('PENDING').find(p => p.student_id === reg.student.id)!;
+    PaymentService.verifyPayment(payment.id, 'admin-root-01');
+    db.prepare("UPDATE rooms SET status = 'MAINTENANCE' WHERE id = 'rm-f-104'").run();
+    await expect(AllocationService.finalizeGroupAllocation({ groupId: reg.group.id, adminId: 'admin-root-01', overrideRoomId: 'rm-f-104', accommodationStartDate: '2026-11-01' })).rejects.toThrow(/maintenance/i);
+    db.prepare("UPDATE booking_groups SET held_room_id = 'rm-f-105' WHERE id = 'grp-demo-04'").run();
+    await expect(AllocationService.finalizeGroupAllocation({ groupId: reg.group.id, adminId: 'admin-root-01', overrideRoomId: 'rm-f-105', accommodationStartDate: '2026-11-01' })).rejects.toThrow(/held/i);
+  });
+
+  it('preserves occupancy compatibility and restores an empty old room after reallocation', () => {
+    const db = getDb();
+    expect(() => AllocationService.reallocateStudent({ studentId: 'stu-demo-01', newRoomId: 'rm-m-201', reason: 'Wrong accommodation type', adminId: 'admin-root-01' })).toThrow(/capacity must match/i);
+    const moved = AllocationService.reallocateStudent({ studentId: 'stu-demo-01', newRoomId: 'rm-m-104', reason: 'Accessibility move', adminId: 'admin-root-01' });
+    expect(moved.room_id).toBe('rm-m-104');
+    expect((db.prepare("SELECT status FROM rooms WHERE id = 'rm-m-101'").get() as any).status).toBe('AVAILABLE');
   });
 });

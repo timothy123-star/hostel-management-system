@@ -1,18 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api/client.js';
-import { Users, Clock, ShieldCheck, Filter, UserPlus } from 'lucide-react';
+import { Users, Clock, ShieldCheck, Filter, UserPlus, Play } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge.js';
 
 export const MatchingQueuePage: React.FC = () => {
   const [queue, setQueue] = useState<any[]>([]);
   const [filterHostel, setFilterHostel] = useState<string>('ALL');
   const [isLoading, setIsLoading] = useState(true);
+  const [groups, setGroups] = useState<any[]>([]);
+  const [isRunning, setIsRunning] = useState(false);
 
   const loadQueue = async () => {
     setIsLoading(true);
     try {
-      const res = await api.getMatchingQueue(filterHostel !== 'ALL' ? filterHostel : undefined);
+      const [res, groupRes] = await Promise.all([
+        api.getMatchingQueue(filterHostel !== 'ALL' ? filterHostel : undefined),
+        api.getBookingGroups(filterHostel !== 'ALL' ? filterHostel : undefined, 'FORMING')
+      ]);
       setQueue(res.queue);
+      setGroups(groupRes.groups.filter(g => g.target_capacity === 3 && g.member_count === 2 && g.members?.every((m: any) => m.auto_complete_triple_consent === 1)));
     } catch (err) {
       console.error('Failed to load matching queue:', err);
     } finally {
@@ -24,6 +30,18 @@ export const MatchingQueuePage: React.FC = () => {
     loadQueue();
   }, [filterHostel]);
 
+  const runMatching = async () => {
+    setIsRunning(true);
+    try { await api.runMatching(filterHostel !== 'ALL' ? filterHostel : undefined); await loadQueue(); }
+    catch (err: any) { alert(err.message || 'Matching failed'); }
+    finally { setIsRunning(false); }
+  };
+
+  const completePair = async (groupId: string, queueId: string) => {
+    try { await api.completeGroupFromQueue(groupId, queueId); await loadQueue(); }
+    catch (err: any) { alert(err.message || 'Could not complete this group'); }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -33,6 +51,26 @@ export const MatchingQueuePage: React.FC = () => {
           Students who opted into random matching. Strictly partitioned by hostel facility, room capacity, and FIFO priority timestamp.
         </p>
       </div>
+
+      <div className="flex flex-wrap gap-3 items-center justify-between bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+        <p className="text-xs text-slate-600">Run FIFO matching after reviewing the consented queue. A known triple pair can only receive the earliest compatible consenting student.</p>
+        <button onClick={runMatching} disabled={isRunning} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold disabled:opacity-50">
+          <Play className="w-3.5 h-3.5" /> {isRunning ? 'Matching…' : 'Run Matching'}
+        </button>
+      </div>
+
+      {groups.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900 space-y-2">
+          <p className="font-bold">Manager completion for agreed known triple pairs</p>
+          {groups.map(group => {
+            const candidate = queue.find(item => item.hostel_id === group.hostel_id && item.target_capacity === 3);
+            return <div key={group.id} className="flex items-center justify-between gap-3">
+              <span>{group.group_code} — {candidate ? `next FIFO candidate: ${candidate.full_name}` : 'no compatible candidate waiting'}</span>
+              {candidate && <button onClick={() => completePair(group.id, candidate.id)} className="px-3 py-1.5 bg-amber-700 text-white rounded-lg font-semibold">Complete with next student</button>}
+            </div>;
+          })}
+        </div>
+      )}
 
       {/* Matching Rules Info Card */}
       <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex items-start gap-3 text-xs text-blue-900">

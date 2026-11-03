@@ -82,6 +82,7 @@ export interface BookingGroup {
   created_by_student_id: string;
   eligible_at?: string | null;
   held_room_id?: string | null;
+  auto_complete_triple_consent?: number;
   created_at: string;
   updated_at: string;
   members?: (BookingGroupMember & { student: Student; payment?: Payment })[];
@@ -95,6 +96,7 @@ export interface BookingGroupMember {
   student_id: string;
   role: GroupMemberRole;
   is_matched_from_queue: number;
+  auto_complete_triple_consent?: number;
   joined_at: string;
 }
 
@@ -257,6 +259,7 @@ export type WhatsAppState =
   | 'AWAITING_LEVEL'
   | 'AWAITING_OCCUPANCY'
   | 'AWAITING_ROOMMATE_CHOICE'
+  | 'AWAITING_AUTO_COMPLETE_CONSENT'
   | 'AWAITING_INVITE_CODE'
   | 'AWAITING_RANDOM_CONSENT';
 

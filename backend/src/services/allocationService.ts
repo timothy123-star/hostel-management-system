@@ -31,6 +31,7 @@ export class AllocationService {
              (SELECT COUNT(*) FROM room_allocations ra WHERE ra.room_id = r.id AND ra.status IN ('HOLD', 'FINALIZED')) as current_occupants
       FROM rooms r
       WHERE r.hostel_id = ? AND r.capacity = ? AND r.status != 'MAINTENANCE'
+        AND r.id NOT IN (SELECT held_room_id FROM booking_groups WHERE held_room_id IS NOT NULL AND status IN ('FORMING', 'READY_FOR_ALLOCATION'))
         AND (r.capacity - (SELECT COUNT(*) FROM room_allocations ra WHERE ra.room_id = r.id AND ra.status IN ('HOLD', 'FINALIZED'))) >= ?
       ORDER BY r.room_number ASC
       LIMIT 1
@@ -97,6 +98,13 @@ export class AllocationService {
     if (!targetRoom) {
       throw new Error('Target room not found');
     }
+    if (targetRoom.status === 'MAINTENANCE') {
+      throw new Error(`Room ${targetRoom.room_number} is under maintenance and cannot be allocated.`);
+    }
+    const heldByAnotherGroup = db.prepare(`SELECT id FROM booking_groups WHERE held_room_id = ? AND id != ? AND status IN ('FORMING', 'READY_FOR_ALLOCATION')`).get(targetRoomId, group.id);
+    if (heldByAnotherGroup) {
+      throw new Error(`Room ${targetRoom.room_number} is already held for another booking group.`);
+    }
 
     // CRITICAL: Facility Separation Rule
     if (targetRoom.hostel_id !== group.hostel_id) {
@@ -122,9 +130,7 @@ export class AllocationService {
     // Finalize within synchronous SQLite transaction
     db.transaction(() => {
       // Cancel any previous hold allocations for this group
-      db.prepare(`
-        DELETE FROM room_allocations WHERE booking_group_id = ?
-      `).run(group.id);
+      db.prepare(`UPDATE room_allocations SET status = 'CANCELLED', updated_at = ? WHERE booking_group_id = ? AND status = 'HOLD'`).run(now, group.id);
 
       for (const member of group.members!) {
         const allocId = `alloc-${crypto.randomUUID()}`;
@@ -241,6 +247,15 @@ export class AllocationService {
     if (!newRoom) {
       throw new Error('Target room not found');
     }
+    if (newRoom.status === 'MAINTENANCE') {
+      throw new Error(`Target room ${newRoom.room_number} is under maintenance.`);
+    }
+
+    // A move must preserve the accommodation type the student paid for.
+    const group = db.prepare('SELECT target_capacity FROM booking_groups WHERE id = ?').get(currentAlloc.booking_group_id) as any;
+    if (!group || newRoom.capacity !== group.target_capacity) {
+      throw new Error('Target room capacity must match the student\'s booking group occupancy.');
+    }
 
     // Facility check
     if (newRoom.hostel_id !== currentAlloc.current_hostel_id) {
@@ -291,6 +306,14 @@ export class AllocationService {
         SET room_allocation_id = ?, updated_at = ?
         WHERE student_id = ? AND status = 'ACTIVE'
       `).run(newAllocId, now, params.studentId);
+
+      const oldOccupants = db.prepare("SELECT COUNT(*) as count FROM room_allocations WHERE room_id = ? AND status = 'FINALIZED'").get(currentAlloc.room_id) as any;
+      if (oldOccupants.count === 0) {
+        db.prepare("UPDATE rooms SET status = 'AVAILABLE', updated_at = ? WHERE id = ? AND status != 'MAINTENANCE'").run(now, currentAlloc.room_id);
+      }
+      const newOccupants = db.prepare("SELECT COUNT(*) as count FROM room_allocations WHERE room_id = ? AND status = 'FINALIZED'").get(params.newRoomId) as any;
+      db.prepare("UPDATE rooms SET status = ?, updated_at = ? WHERE id = ?")
+        .run(newOccupants.count >= newRoom.capacity ? 'OCCUPIED' : 'AVAILABLE', now, params.newRoomId);
     })();
 
     // Audit log

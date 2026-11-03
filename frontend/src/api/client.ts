@@ -72,7 +72,7 @@ export const api = {
 
   // Students
   getStudents: (params?: { search?: string; gender?: string; level?: string }) => {
-    const q = new URLSearchParams(params as any).toString();
+    const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value !== undefined && value !== '') as [string, string][]).toString();
     return apiRequest<{ students: any[] }>(`/students${q ? `?${q}` : ''}`);
   },
   getStudentById: (id: string) => apiRequest<{ student: any }>(`/students/${id}`),
@@ -88,6 +88,12 @@ export const api = {
   },
   getBookingGroupById: (id: string) => apiRequest<{ group: any }>(`/bookings/groups/${id}`),
   getMatchingQueue: (hostel?: string) => apiRequest<{ queue: any[] }>(`/bookings/matching-queue${hostel ? `?hostel=${hostel}` : ''}`),
+  runMatching: (hostel?: string, capacity?: number) => apiRequest<{ processed: number }>('/bookings/matching/run', {
+    method: 'POST', body: JSON.stringify({ hostel, capacity })
+  }),
+  completeGroupFromQueue: (groupId: string, queueItemId: string) => apiRequest<{ group: any }>(`/bookings/groups/${groupId}/complete-from-queue`, {
+    method: 'POST', body: JSON.stringify({ queue_item_id: queueItemId })
+  }),
 
   // Payments
   getPayments: (status?: string, hostel?: string) => {

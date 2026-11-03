@@ -28,6 +28,18 @@ export function initSchema(db: Database.Database) {
   const schemaPath = path.resolve(__dirname, 'schema.sql');
   const sql = fs.readFileSync(schemaPath, 'utf8');
   db.exec(sql);
+
+  // Lightweight forward-only migrations for existing development databases.
+  // `CREATE TABLE IF NOT EXISTS` deliberately does not alter an existing table.
+  const groupColumns = db.prepare("PRAGMA table_info(booking_groups)").all() as any[];
+  if (!groupColumns.some(column => column.name === 'auto_complete_triple_consent')) {
+    db.exec('ALTER TABLE booking_groups ADD COLUMN auto_complete_triple_consent INTEGER NOT NULL DEFAULT 0 CHECK (auto_complete_triple_consent IN (0, 1))');
+  }
+
+  const memberColumns = db.prepare("PRAGMA table_info(booking_group_members)").all() as any[];
+  if (!memberColumns.some(column => column.name === 'auto_complete_triple_consent')) {
+    db.exec('ALTER TABLE booking_group_members ADD COLUMN auto_complete_triple_consent INTEGER NOT NULL DEFAULT 0 CHECK (auto_complete_triple_consent IN (0, 1))');
+  }
 }
 
 export function resetDb() {

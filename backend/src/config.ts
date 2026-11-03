@@ -14,7 +14,9 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || 'fallback-demo-secret-key-min-32-chars-long!',
   adminUsername: process.env.ADMIN_USERNAME || 'admin',
   adminPassword: process.env.ADMIN_PASSWORD || 'AdminPassword123!',
-  dbPath: process.env.DATABASE_FILE || path.resolve(__dirname, '../../hostel.sqlite'),
+  dbPath: process.env.DATABASE_FILE
+    ? path.resolve(process.env.DATABASE_FILE)
+    : path.resolve(__dirname, '../../hostel.sqlite'),
   
   meta: {
     accessToken: process.env.META_WHATSAPP_ACCESS_TOKEN || '',

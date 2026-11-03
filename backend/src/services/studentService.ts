@@ -67,13 +67,14 @@ export class StudentService {
     if (input.roommate_mode === 'KNOWN') {
       if (input.group_invite_code && input.group_invite_code.trim()) {
         // Joining existing group
-        group = BookingGroupService.joinGroup(studentId, input.group_invite_code);
+        group = BookingGroupService.joinGroup(studentId, input.group_invite_code, !!input.auto_complete_triple_consent);
       } else {
         // Creating new booking group as leader
         group = BookingGroupService.createGroup({
           studentId,
           hostelCode: input.gender,
-          targetCapacity: input.preferred_occupancy
+          targetCapacity: input.preferred_occupancy,
+          autoCompleteTripleConsent: !!input.auto_complete_triple_consent
         });
       }
     } else if (input.roommate_mode === 'RANDOM' && input.consent_random_matching) {
