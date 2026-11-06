@@ -204,13 +204,36 @@ CREATE TABLE IF NOT EXISTS qr_credentials (
 );
 CREATE INDEX IF NOT EXISTS idx_qr_token_hash ON qr_credentials(token_hash);
 
+-- Reissuable individual credentials. The legacy qr_credentials table is kept
+-- intact as historical data from the pre-photo-approval implementation.
+CREATE TABLE IF NOT EXISTS resident_qr_credentials (
+  id TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  issued_for_allocation_id TEXT NOT NULL REFERENCES room_allocations(id) ON DELETE RESTRICT,
+  token_hash TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'REVOKED', 'EXPIRED')),
+  issued_by_admin_id TEXT NOT NULL REFERENCES admin_users(id) ON DELETE RESTRICT,
+  issued_at TEXT NOT NULL DEFAULT (datetime('now')),
+  revoked_at TEXT,
+  revoked_by_admin_id TEXT REFERENCES admin_users(id) ON DELETE SET NULL,
+  revoke_reason TEXT,
+  reissued_from_credential_id TEXT REFERENCES resident_qr_credentials(id) ON DELETE SET NULL,
+  last_verified_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_resident_qr_one_active ON resident_qr_credentials(student_id) WHERE status = 'ACTIVE';
+CREATE INDEX IF NOT EXISTS idx_resident_qr_token_hash ON resident_qr_credentials(token_hash);
+
 -- 11. Access Logs (Verification records)
 CREATE TABLE IF NOT EXISTS access_logs (
   id TEXT PRIMARY KEY,
   qr_credential_id TEXT REFERENCES qr_credentials(id) ON DELETE SET NULL,
+  resident_qr_credential_id TEXT REFERENCES resident_qr_credentials(id) ON DELETE SET NULL,
   student_id TEXT REFERENCES students(id) ON DELETE SET NULL,
   verified_by_admin_id TEXT REFERENCES admin_users(id) ON DELETE SET NULL,
   verification_method TEXT NOT NULL CHECK (verification_method IN ('CAMERA', 'MANUAL_ENTRY')),
+  verification_channel TEXT NOT NULL DEFAULT 'MANAGER' CHECK (verification_channel IN ('MANAGER', 'PUBLIC_BROWSER')),
   outcome TEXT NOT NULL CHECK (outcome IN ('GRANTED', 'DENIED')),
   reason TEXT,
   logged_at TEXT NOT NULL DEFAULT (datetime('now'))

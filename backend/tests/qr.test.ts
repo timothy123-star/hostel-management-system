@@ -1,59 +1,88 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import fs from 'fs';
+import path from 'path';
+import { getDb } from '../src/db/connection.js';
 import { runSeed } from '../src/db/seed.js';
 import { QRService } from '../src/services/qrService.js';
-import { getDb } from '../src/db/connection.js';
+import { config } from '../src/config.js';
 
-describe('QR Digital Identity & Verification Rules', () => {
-  beforeEach(async () => {
-    await runSeed(true);
+const studentId = 'stu-demo-01';
+const adminId = 'admin-root-01';
+
+async function approveCurrentPhoto() {
+  const db = getDb();
+  db.prepare("UPDATE students SET photo_storage_key = 'qr-test-photo.jpg' WHERE id = ?").run(studentId);
+  db.prepare(`INSERT INTO student_photo_submissions (id, student_id, storage_key, mime_type, status, submitted_at, reviewed_by_admin_id, reviewed_at)
+    VALUES ('qr-test-photo', ?, 'qr-test-photo.jpg', 'image/jpeg', 'APPROVED', datetime('now'), ?, datetime('now'))`).run(studentId, adminId);
+}
+
+describe('resident QR credentials', () => {
+  beforeEach(async () => { await runSeed(true); });
+
+  it('requires a current approved photograph before manager issuance', () => {
+    expect(() => QRService.issueCredential(studentId, adminId)).toThrow('approved current photograph');
   });
 
-  it('generates an unpredictable cryptographic token without leaking plaintext student data in QR content', () => {
-    const { token, tokenHash } = QRService.generateToken();
-    expect(token.length).toBe(64); // 32 random bytes in hex
-    expect(tokenHash.length).toBe(64); // sha256 hex
-    expect(token).not.toContain('John');
-    expect(token).not.toContain('+1555');
-  });
-
-  it('grants access for an active valid QR credential and verifies student details', () => {
-    // John Doe has active credential in seed
-    const db = getDb();
-    const cred = db.prepare('SELECT * FROM qr_credentials WHERE student_id = \'stu-demo-01\'').get() as any;
-    expect(cred).toBeDefined();
-
-    // Verify token hash match
-    const result = QRService.verifyToken(cred.token_hash, 'admin-root-01', 'MANUAL_ENTRY');
-    expect(result.outcome).toBe('GRANTED');
+  it('stores only a SHA-256 hash, verifies an opaque URL, and logs the public verification', async () => {
+    await approveCurrentPhoto();
+    const issued = QRService.issueCredential(studentId, adminId);
+    expect(issued.token).toHaveLength(43);
+    expect(issued.verificationUrl).toContain('/resident-verification/');
+    const stored = getDb().prepare('SELECT * FROM resident_qr_credentials WHERE id = ?').get((issued.credential as any).id) as any;
+    expect(stored.token_hash).toBe(QRService.hashToken(issued.token));
+    expect(JSON.stringify(stored)).not.toContain(issued.token);
+    const result = QRService.getPublicVerification(issued.token);
+    expect(result.status).toBe('VALID_RESIDENT');
     expect(result.student.full_name).toContain('John Doe');
-    expect(result.hostel.code).toBe('MALE');
-    expect(result.room.room_number).toBe('M-101');
+    expect(getDb().prepare("SELECT outcome FROM access_logs WHERE resident_qr_credential_id = ? ORDER BY logged_at DESC LIMIT 1").get(stored.id)).toEqual({ outcome: 'GRANTED' });
   });
 
-  it('denies access when a QR credential is REVOKED by management', () => {
-    // Peter Capaldi is revoked in seed
-    const db = getDb();
-    const cred = db.prepare('SELECT * FROM qr_credentials WHERE student_id = \'stu-demo-11\'').get() as any;
-    expect(cred).toBeDefined();
-    expect(cred.status).toBe('REVOKED');
-
-    const result = QRService.verifyToken(cred.token_hash, 'admin-root-01', 'MANUAL_ENTRY');
-    expect(result.outcome).toBe('DENIED');
-    expect(result.reason).toContain('revoked');
+  it('reissues by revoking the prior credential and records the lineage and audit record', async () => {
+    await approveCurrentPhoto();
+    const first = QRService.issueCredential(studentId, adminId);
+    const second = QRService.issueCredential(studentId, adminId, true);
+    const old = getDb().prepare('SELECT * FROM resident_qr_credentials WHERE id = ?').get((first.credential as any).id) as any;
+    const replacement = getDb().prepare('SELECT * FROM resident_qr_credentials WHERE id = ?').get((second.credential as any).id) as any;
+    expect(old.status).toBe('REVOKED');
+    expect(replacement.reissued_from_credential_id).toBe(old.id);
+    expect(QRService.getPublicVerification(first.token).status).toBe('INVALID_CREDENTIAL');
+    expect(QRService.getPublicVerification(second.token).status).toBe('VALID_RESIDENT');
+    expect(getDb().prepare("SELECT id FROM audit_logs WHERE action = 'REISSUE_RESIDENT_QR_CREDENTIAL' AND entity_id = ?").get(replacement.id)).toBeTruthy();
   });
 
-  it('denies access for an unrecognised/invalid token without crashing', () => {
-    const fakeToken = 'totally-fake-unrecognised-qr-pass-token-12345';
-    const result = QRService.verifyToken(fakeToken, 'admin-root-01', 'CAMERA');
-    expect(result.outcome).toBe('DENIED');
-    expect(result.reason).toContain('Invalid or unrecognised');
+  it('uses the current finalized allocation rather than the allocation used at issuance', async () => {
+    await approveCurrentPhoto();
+    const issued = QRService.issueCredential(studentId, adminId);
+    getDb().prepare("UPDATE room_allocations SET room_id = 'rm-m-104' WHERE id = 'alloc-demo-01'").run();
+    const result = QRService.getPublicVerification(issued.token);
+    expect(result.status).toBe('VALID_RESIDENT');
+    expect(result.room.room_number).toBe('M-104');
   });
 
-  it('is idempotent: does not mint a new identity token when an existing active QR is requested', async () => {
-    const firstCall = await QRService.getOrIssueCredential('stu-demo-01', 'alloc-demo-01');
-    const secondCall = await QRService.getOrIssueCredential('stu-demo-01', 'alloc-demo-01');
+  it('delivers an approved photograph only while the credential remains valid', async () => {
+    await approveCurrentPhoto();
+    fs.mkdirSync(config.photoStorageDir, { recursive: true });
+    fs.writeFileSync(path.join(config.photoStorageDir, 'qr-test-photo.jpg'), Buffer.from('test-photo'));
+    const issued = QRService.issueCredential(studentId, adminId);
+    expect(QRService.getVerifiedPhoto(issued.token).mimeType).toBe('image/jpeg');
+    QRService.revokeCredential((issued.credential as any).id, 'Security hold', adminId);
+    expect(() => QRService.getVerifiedPhoto(issued.token)).toThrow('Credential is not valid');
+  });
 
-    expect(firstCall.credential.id).toBe(secondCall.credential.id);
-    expect(firstCall.credential.token_hash).toBe(secondCall.credential.token_hash);
+  it('denies revoked, invalid, payment-ineligible, future, and expired credentials', async () => {
+    await approveCurrentPhoto();
+    const issued = QRService.issueCredential(studentId, adminId);
+    expect(QRService.revokeCredential((issued.credential as any).id, 'Security hold', adminId)).toBe(true);
+    expect(QRService.getPublicVerification(issued.token).status).toBe('INVALID_CREDENTIAL');
+    expect(QRService.getPublicVerification('not-a-valid-credential').status).toBe('INVALID_CREDENTIAL');
+    const next = QRService.issueCredential(studentId, adminId, true);
+    getDb().prepare("UPDATE payments SET status = 'PENDING' WHERE student_id = ? AND booking_group_id = 'grp-demo-01'").run(studentId);
+    expect(QRService.getPublicVerification(next.token).status).toBe('INVALID_CREDENTIAL');
+    getDb().prepare("UPDATE payments SET status = 'VERIFIED' WHERE student_id = ? AND booking_group_id = 'grp-demo-01'").run(studentId);
+    getDb().prepare("UPDATE room_allocations SET accommodation_start_date = '2999-01-01' WHERE id = 'alloc-demo-01'").run();
+    expect(QRService.getPublicVerification(next.token).status).toBe('INVALID_CREDENTIAL');
+    getDb().prepare("UPDATE room_allocations SET accommodation_start_date = '2000-01-01', accommodation_end_date = '2000-01-02' WHERE id = 'alloc-demo-01'").run();
+    expect(QRService.getPublicVerification(next.token).status).toBe('INVALID_CREDENTIAL');
+    expect(getDb().prepare('SELECT status FROM resident_qr_credentials WHERE id = ?').get((next.credential as any).id)).toEqual({ status: 'EXPIRED' });
   });
 });

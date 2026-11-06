@@ -71,7 +71,7 @@ export const api = {
     }),
 
   // Students
-  getStudents: (params?: { search?: string; gender?: string; level?: string }) => {
+  getStudents: (params?: { search?: string; gender?: string; level?: string; limit?: number }) => {
     const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value !== undefined && value !== '') as [string, string][]).toString();
     return apiRequest<{ students: any[] }>(`/students${q ? `?${q}` : ''}`);
   },
@@ -125,7 +125,7 @@ export const api = {
 
   // Allocation
   finalizeAllocation: (data: { groupId: string; accommodationStartDate: string; overrideRoomId?: string; overrideReason?: string }) =>
-    apiRequest<{ allocations: any[]; qrCredentials: any[] }>('/allocations/finalize', {
+    apiRequest<{ allocations: any[] }>('/allocations/finalize', {
       method: 'POST',
       body: JSON.stringify({
         group_id: data.groupId,
@@ -155,14 +155,12 @@ export const api = {
       body: JSON.stringify({ token, method })
     }),
   getQRCredentials: () => apiRequest<{ credentials: any[] }>('/qr/credentials'),
+  issueQRCredential: (studentId: string, reissue = false) =>
+    apiRequest<any>(`/qr/credentials/${studentId}/issue`, { method: 'POST', body: JSON.stringify({ reissue }) }),
   revokeQR: (id: string, reason: string) =>
     apiRequest<any>(`/qr/${id}/revoke`, {
       method: 'POST',
       body: JSON.stringify({ reason })
-    }),
-  reactivateQR: (id: string) =>
-    apiRequest<any>(`/qr/${id}/reactivate`, {
-      method: 'POST'
     }),
   getAccessLogs: () => apiRequest<{ accessLogs: any[] }>('/qr/access-logs'),
 

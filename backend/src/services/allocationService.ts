@@ -2,7 +2,6 @@ import crypto from 'crypto';
 import { getDb } from '../db/connection.js';
 import { RoomAllocation, HostelCode, Room } from '@hostel/shared';
 import { AuditService } from './auditService.js';
-import { QRService } from './qrService.js';
 import { BookingGroupService } from './bookingGroupService.js';
 
 export class AllocationService {
@@ -46,7 +45,8 @@ export class AllocationService {
    * - Selects automatically or uses manager override room.
    * - Validates room facility and capacity.
    * - Records 12-month accommodation period starting on chosen start date.
-   * - Mints individual QR credentials for all members!
+   * - Does not issue credentials; issuance is an explicit manager action after
+   *   the resident photograph has been approved.
    * - Updates room status and group status to 'ALLOCATED'.
    * - Logs audit trail if override occurred.
    */
@@ -56,7 +56,7 @@ export class AllocationService {
     overrideRoomId?: string;
     overrideReason?: string;
     accommodationStartDate: string; // YYYY-MM-DD
-  }): Promise<{ allocations: RoomAllocation[]; qrCredentials: any[] }> {
+  }): Promise<{ allocations: RoomAllocation[] }> {
     const db = getDb();
     const group = BookingGroupService.getGroupById(params.groupId);
 
@@ -125,7 +125,6 @@ export class AllocationService {
     const expiryDate = this.calculateExpiryDate(params.accommodationStartDate);
     const now = new Date().toISOString();
     const createdAllocations: RoomAllocation[] = [];
-    const createdQRs: any[] = [];
 
     // Finalize within synchronous SQLite transaction
     db.transaction(() => {
@@ -182,12 +181,6 @@ export class AllocationService {
       }
     })();
 
-    // Issue individual cryptographic QR credential for all members
-    for (const alloc of createdAllocations) {
-      const qrResult = await QRService.getOrIssueCredential(alloc.student_id, alloc.id);
-      createdQRs.push(qrResult);
-    }
-
     // Audit log
     AuditService.log({
       adminId: params.adminId,
@@ -207,7 +200,7 @@ export class AllocationService {
         : `Allocated group ${group.group_code} to compatible room ${targetRoom.room_number}`
     });
 
-    return { allocations: createdAllocations, qrCredentials: createdQRs };
+    return { allocations: createdAllocations };
   }
 
   /**
@@ -304,13 +297,6 @@ export class AllocationService {
         now
       );
 
-      // Re-link QR credential to new allocation
-      db.prepare(`
-        UPDATE qr_credentials 
-        SET room_allocation_id = ?, updated_at = ?
-        WHERE student_id = ? AND status = 'ACTIVE'
-      `).run(newAllocId, now, params.studentId);
-
       const oldOccupants = db.prepare("SELECT COUNT(*) as count FROM room_allocations WHERE room_id = ? AND status = 'FINALIZED'").get(currentAlloc.room_id) as any;
       if (oldOccupants.count === 0) {
         db.prepare("UPDATE rooms SET status = 'AVAILABLE', updated_at = ? WHERE id = ? AND status != 'MAINTENANCE'").run(now, currentAlloc.room_id);
@@ -362,7 +348,6 @@ export class AllocationService {
         db.prepare(`INSERT INTO room_allocations (id, room_id, student_id, booking_group_id, status, allocated_by_admin_id, accommodation_start_date, accommodation_end_date, created_at, updated_at)
           VALUES (?, ?, ?, ?, 'FINALIZED', ?, ?, ?, ?, ?)`)
           .run(id, params.newRoomId, old.student_id, params.groupId, params.adminId || null, old.accommodation_start_date, old.accommodation_end_date, now, now);
-        db.prepare("UPDATE qr_credentials SET room_allocation_id = ?, updated_at = ? WHERE student_id = ? AND status = 'ACTIVE'").run(id, now, old.student_id);
         created.push({ ...old, id, room_id: params.newRoomId, status: 'FINALIZED', updated_at: now });
       }
       for (const oldRoomId of [...new Set(allocations.map(a => a.room_id))]) {

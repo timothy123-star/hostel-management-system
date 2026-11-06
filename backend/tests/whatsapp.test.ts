@@ -26,7 +26,7 @@ describe('WhatsApp Conversational Assistant & Simulator', () => {
     expect(reply.buttons?.some(b => b.title === 'Show my QR code')).toBe(true);
   });
 
-  it('handles Show my QR code button for an allocated student and replies with QR image', async () => {
+  it('never silently issues a QR credential from the Show my QR button', async () => {
     // John Doe's phone is +15551001001
     const johnPhone = '+15551001001';
     await ConversationHandler.processIncomingMessage({
@@ -36,14 +36,11 @@ describe('WhatsApp Conversational Assistant & Simulator', () => {
     });
 
     const history = SimulatorProvider.getHistory(johnPhone);
-    const imageReply = history.find(m => m.type === 'image');
-    expect(imageReply).toBeDefined();
-    expect(imageReply?.imageUrl).toContain('data:image/png;base64');
-    expect(imageReply?.caption).toContain('OFFICIAL HOSTEL DIGITAL IDENTITY PASS');
-    expect(imageReply?.caption).toContain('John Doe');
+    expect(history.some(m => m.type === 'image')).toBe(false);
+    expect(history.some(m => m.text?.includes('Awaiting Manager Issuance'))).toBe(true);
   });
 
-  it('handles typed text fallback "QR" for allocated student', async () => {
+  it('handles typed QR fallback without issuing a credential', async () => {
     const johnPhone = '+15551001001';
     await ConversationHandler.processIncomingMessage({
       messageId: 'msg-qr-fallback-002',
@@ -52,9 +49,8 @@ describe('WhatsApp Conversational Assistant & Simulator', () => {
     });
 
     const history = SimulatorProvider.getHistory(johnPhone);
-    const imageReply = history.find(m => m.type === 'image');
-    expect(imageReply).toBeDefined();
-    expect(imageReply?.caption).toContain('John Doe');
+    expect(history.some(m => m.type === 'image')).toBe(false);
+    expect(history.some(m => m.text?.includes('Awaiting Manager Issuance'))).toBe(true);
   });
 
   it('completes multi-step registration conversation for a new student', async () => {

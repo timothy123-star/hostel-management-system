@@ -112,20 +112,14 @@ export class ConversationHandler {
       return;
     }
 
-    // Allocation is finalized! Fetch existing QR credential
-    const qrResult = await QRService.getOrIssueCredential(student.id, alloc.id);
-
-    const caption = `🏛️ *OFFICIAL HOSTEL DIGITAL IDENTITY PASS*\n\n` +
-      `👤 *Student:* ${student.full_name}\n` +
-      `🏢 *Facility:* ${alloc.hostel_code === 'MALE' ? 'Alpha Male Hall' : 'Beta Female Hall'}\n` +
-      `🚪 *Room:* ${alloc.room_number || 'Assigned'}\n` +
-      `📅 *Start Date:* ${alloc.accommodation_start_date}\n` +
-      `⏳ *Expiry Date:* ${alloc.accommodation_end_date}\n` +
-      `🛡️ *Status:* ACTIVE\n\n` +
-      `_Show this QR code at security checkpoints and hostel entry gates for verification._`;
-
-    // Send the QR image
-    await provider.sendImageMessage(phone, qrResult.qrImageData, caption);
+    const credential = await QRService.getQRForExistingCredential(student.id);
+    if (!credential) {
+      await provider.sendTextMessage(phone,
+        '⏳ *Digital Pass Awaiting Manager Issuance*\n\nYour finalized accommodation is recorded, but a manager must explicitly authorize your credential after payment and photograph review. This request never creates a credential automatically.');
+      return;
+    }
+    await provider.sendTextMessage(phone,
+      '🔐 *Digital Pass Already Issued*\n\nFor security, QR tokens are never stored for re-delivery. Please contact hostel management to request a documented reissue if you no longer have the originally issued pass.');
   }
 
   /**

@@ -67,7 +67,7 @@ export class StatsService {
     `).get() as any;
 
     // Active QRs
-    const qrRow = db.prepare('SELECT COUNT(*) as count FROM qr_credentials WHERE status = \'ACTIVE\'').get() as any;
+    const qrRow = db.prepare('SELECT COUNT(*) as count FROM resident_qr_credentials WHERE status = \'ACTIVE\'').get() as any;
 
     // Matching queue
     const queueRow = db.prepare('SELECT COUNT(*) as count FROM matching_queue WHERE status = \'WAITING\'').get() as any;

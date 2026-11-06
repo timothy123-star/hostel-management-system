@@ -140,8 +140,8 @@ export async function runSeed(reset = false) {
   `).run(alloc1Id, grp1Id);
 
   // Generate real verifiable QR for John Doe
-  const { token: qrToken1, tokenHash: qrHash1 } = QRService.generateToken();
-  const qrImage1 = await QRService.generateQRImage(qrToken1);
+  const { tokenHash: qrHash1 } = QRService.generateToken();
+  const qrImage1 = null; // Legacy history is retained without persisting a raw-token QR image.
   db.prepare(`
     INSERT OR IGNORE INTO qr_credentials (id, student_id, room_allocation_id, token_hash, status, issued_at, last_issued_at, qr_image_data, created_at, updated_at)
     VALUES ('qr-demo-01', 'stu-demo-01', ?, ?, 'ACTIVE', datetime('now', '-28 days'), datetime('now', '-28 days'), ?, datetime('now', '-28 days'), datetime('now'))
@@ -203,10 +203,10 @@ export async function runSeed(reset = false) {
   `).run(alloc2Id, grp2Id, alloc3Id, grp2Id);
 
   // QR Credentials for both
-  const { token: qrToken2, tokenHash: qrHash2 } = QRService.generateToken();
-  const { token: qrToken3, tokenHash: qrHash3 } = QRService.generateToken();
-  const qrImage2 = await QRService.generateQRImage(qrToken2);
-  const qrImage3 = await QRService.generateQRImage(qrToken3);
+  const { tokenHash: qrHash2 } = QRService.generateToken();
+  const { tokenHash: qrHash3 } = QRService.generateToken();
+  const qrImage2 = null;
+  const qrImage3 = null;
 
   db.prepare(`
     INSERT OR IGNORE INTO qr_credentials (id, student_id, room_allocation_id, token_hash, status, issued_at, last_issued_at, qr_image_data, created_at, updated_at)
@@ -342,8 +342,8 @@ export async function runSeed(reset = false) {
     INSERT OR IGNORE INTO room_allocations (id, room_id, student_id, booking_group_id, status, allocated_by_admin_id, accommodation_start_date, accommodation_end_date, created_at, updated_at)
     VALUES (?, 'rm-m-102', 'stu-demo-08', ?, 'FINALIZED', 'admin-root-01', '2025-11-09', '2026-11-09', '2025-11-09', datetime('now'))
   `).run(alloc8Id, grp5Id);
-  const { token: qrToken8, tokenHash: qrHash8 } = QRService.generateToken();
-  const qrImage8 = await QRService.generateQRImage(qrToken8);
+  const { tokenHash: qrHash8 } = QRService.generateToken();
+  const qrImage8 = null;
   db.prepare(`
     INSERT OR IGNORE INTO qr_credentials (id, student_id, room_allocation_id, token_hash, status, issued_at, last_issued_at, qr_image_data, created_at, updated_at)
     VALUES ('qr-demo-08', 'stu-demo-08', ?, ?, 'ACTIVE', '2025-11-09', '2025-11-09', ?, '2025-11-09', datetime('now'))
@@ -380,8 +380,8 @@ export async function runSeed(reset = false) {
     INSERT OR IGNORE INTO room_allocations (id, room_id, student_id, booking_group_id, status, allocated_by_admin_id, accommodation_start_date, accommodation_end_date, created_at, updated_at)
     VALUES (?, 'rm-f-101', 'stu-demo-09', ?, 'FINALIZED', 'admin-root-01', '2025-11-15', '2026-11-15', '2025-11-15', datetime('now'))
   `).run(alloc9Id, grp6Id);
-  const { token: qrToken9, tokenHash: qrHash9 } = QRService.generateToken();
-  const qrImage9 = await QRService.generateQRImage(qrToken9);
+  const { tokenHash: qrHash9 } = QRService.generateToken();
+  const qrImage9 = null;
   db.prepare(`
     INSERT OR IGNORE INTO qr_credentials (id, student_id, room_allocation_id, token_hash, status, issued_at, last_issued_at, qr_image_data, created_at, updated_at)
     VALUES ('qr-demo-09', 'stu-demo-09', ?, ?, 'ACTIVE', '2025-11-15', '2025-11-15', ?, '2025-11-15', datetime('now'))
@@ -418,8 +418,8 @@ export async function runSeed(reset = false) {
     INSERT OR IGNORE INTO room_allocations (id, room_id, student_id, booking_group_id, status, allocated_by_admin_id, accommodation_start_date, accommodation_end_date, created_at, updated_at)
     VALUES (?, 'rm-m-201', 'stu-demo-10', ?, 'FINALIZED', 'admin-root-01', '2025-11-28', '2026-11-28', '2025-11-28', datetime('now'))
   `).run(alloc10Id, grp7Id);
-  const { token: qrToken10, tokenHash: qrHash10 } = QRService.generateToken();
-  const qrImage10 = await QRService.generateQRImage(qrToken10);
+  const { tokenHash: qrHash10 } = QRService.generateToken();
+  const qrImage10 = null;
   db.prepare(`
     INSERT OR IGNORE INTO qr_credentials (id, student_id, room_allocation_id, token_hash, status, issued_at, last_issued_at, qr_image_data, created_at, updated_at)
     VALUES ('qr-demo-10', 'stu-demo-10', ?, ?, 'ACTIVE', '2025-11-28', '2025-11-28', ?, '2025-11-28', datetime('now'))
@@ -455,8 +455,8 @@ export async function runSeed(reset = false) {
     INSERT OR IGNORE INTO room_allocations (id, room_id, student_id, booking_group_id, status, allocated_by_admin_id, accommodation_start_date, accommodation_end_date, created_at, updated_at)
     VALUES (?, 'rm-m-103', 'stu-demo-11', ?, 'FINALIZED', 'admin-root-01', '2025-10-25', '2026-10-25', '2025-10-25', datetime('now'))
   `).run(alloc11Id, grp8Id);
-  const { token: qrToken11, tokenHash: qrHash11 } = QRService.generateToken();
-  const qrImage11 = await QRService.generateQRImage(qrToken11);
+  const { tokenHash: qrHash11 } = QRService.generateToken();
+  const qrImage11 = null;
   db.prepare(`
     INSERT OR IGNORE INTO qr_credentials (id, student_id, room_allocation_id, token_hash, status, issued_at, revoked_at, revoke_reason, last_issued_at, qr_image_data, created_at, updated_at)
     VALUES ('qr-demo-11', 'stu-demo-11', ?, ?, 'REVOKED', '2025-10-25', datetime('now', '-5 days'), 'Disciplinary clearance hold (DEMO)', '2025-10-25', ?, '2025-10-25', datetime('now'))
@@ -500,9 +500,7 @@ export async function runSeed(reset = false) {
   `).run();
 
   console.log('Synthetic DEMO data seeding complete!');
-  console.log('Sample QR Tokens for Verification Testing:');
-  console.log(`- Active John Doe Token: ${qrToken1}`);
-  console.log(`- Revoked Peter Capaldi Token: ${qrToken11}`);
+  console.log('Legacy demonstration QR records were preserved without printing credential tokens.');
 }
 
 if (process.argv[1]?.endsWith('seed.ts') || process.argv[1]?.endsWith('seed.js')) {

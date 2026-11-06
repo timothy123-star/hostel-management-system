@@ -75,7 +75,7 @@ describe('Room Allocation & Facility Separation Rules', () => {
     });
 
     expect(result.allocations.length).toBe(3);
-    expect(result.qrCredentials.length).toBe(3);
+    expect(getDb().prepare("SELECT COUNT(*) as count FROM resident_qr_credentials WHERE student_id IN ('stu-demo-04', 'stu-demo-05', 'stu-demo-06')").get()).toEqual({ count: 0 });
   });
 
   it('allows manager to override room and logs audit record', async () => {

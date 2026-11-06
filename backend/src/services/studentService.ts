@@ -163,17 +163,21 @@ export class StudentService {
     }
 
     // Get payment
-    const payment = db.prepare(`
-      SELECT * FROM payments WHERE student_id = ? ORDER BY created_at DESC LIMIT 1
-    `).get(studentId) as any;
+    const payment = current_allocation
+      ? db.prepare(`SELECT * FROM payments WHERE student_id = ? AND booking_group_id = ? ORDER BY created_at DESC LIMIT 1`)
+        .get(studentId, current_allocation.booking_group_id) as any
+      : db.prepare(`SELECT * FROM payments WHERE student_id = ? ORDER BY created_at DESC LIMIT 1`)
+        .get(studentId) as any;
 
-    // Get QR credential
+    // New manager-authorized resident credential history (legacy credentials
+    // remain preserved separately and are not used for access decisions).
     const qr = db.prepare(`
-      SELECT * FROM qr_credentials WHERE student_id = ? ORDER BY created_at DESC LIMIT 1
+      SELECT * FROM resident_qr_credentials WHERE student_id = ? ORDER BY created_at DESC LIMIT 1
     `).get(studentId) as any;
 
     const currentPhoto = db.prepare(`
-      SELECT status FROM student_photo_submissions WHERE student_id = ? ORDER BY submitted_at DESC LIMIT 1
+      SELECT ps.status FROM students s JOIN student_photo_submissions ps ON ps.storage_key = s.photo_storage_key
+      WHERE s.id = ?
     `).get(studentId) as any;
 
     return {

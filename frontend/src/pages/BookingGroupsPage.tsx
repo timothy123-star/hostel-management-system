@@ -216,7 +216,7 @@ export const BookingGroupsPage: React.FC = () => {
                 )}
 
                 {g.status === 'ALLOCATED' && (
-                  <div className="space-y-2"><div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 text-center flex items-center justify-center gap-1.5 font-medium"><CheckCircle2 className="w-4 h-4 text-emerald-600" /> Allocation finalized & digital QR passes active.</div>
+                  <div className="space-y-2"><div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 text-center flex items-center justify-center gap-1.5 font-medium"><CheckCircle2 className="w-4 h-4 text-emerald-600" /> Allocation finalized. Credentials require explicit manager issuance.</div>
                   <button onClick={() => openGroupRelocation(g)} className="w-full py-2 text-xs font-semibold rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50">Relocate whole group (reason required)</button></div>
                 )}
               </div>
@@ -321,7 +321,7 @@ export const BookingGroupsPage: React.FC = () => {
                 disabled={isSubmitting || !selectedRoomId}
                 className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold transition disabled:opacity-50"
               >
-                {isSubmitting ? 'Finalizing & Minting QRs...' : 'Confirm Final Allocation'}
+                {isSubmitting ? 'Finalizing Allocation...' : 'Confirm Final Allocation'}
               </button>
             </div>
           </form>

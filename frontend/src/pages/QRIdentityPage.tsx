@@ -1,320 +1,59 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Camera, QrCode, RefreshCw, Search, ShieldCheck } from 'lucide-react';
 import { api } from '../api/client.js';
-import { QrCode, ShieldAlert, ShieldCheck, Camera, CheckCircle2, XCircle, Search, RefreshCw, Eye } from 'lucide-react';
-import { StatusBadge } from '../components/StatusBadge.js';
 import { Modal } from '../components/Modal.js';
 import { QRScannerModal } from '../components/QRScannerModal.js';
+import { StatusBadge } from '../components/StatusBadge.js';
+
+const facilityName = (code?: string) => code === 'MALE' ? 'Male hostel' : code === 'FEMALE' ? 'Female hostel' : 'No facility';
+const formatDate = (value?: string) => value ? new Date(value).toLocaleDateString() : '—';
+
+function eligibility(student: any) {
+  const allocation = student?.current_allocation;
+  const reasons: string[] = [];
+  const today = new Date().toISOString().slice(0, 10);
+  if (!allocation || allocation.status !== 'FINALIZED') reasons.push('No current finalized accommodation');
+  if (student?.payment?.status !== 'VERIFIED') reasons.push('Individual payment is not verified');
+  if (student?.photo_status !== 'APPROVED') reasons.push('Current photograph is not approved');
+  if (allocation?.accommodation_start_date > today) reasons.push(`Accommodation starts ${allocation.accommodation_start_date}`);
+  if (allocation?.accommodation_end_date < today) reasons.push(`Accommodation expired ${allocation.accommodation_end_date}`);
+  return { eligible: reasons.length === 0, reasons };
+}
 
 export const QRIdentityPage: React.FC = () => {
-  const [credentials, setCredentials] = useState<any[]>([]);
-  const [accessLogs, setAccessLogs] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // Modals
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [previewQR, setPreviewQR] = useState<any | null>(null);
-  const [revokingQR, setRevokingQR] = useState<any | null>(null);
-  const [revokeReason, setRevokeReason] = useState('');
-  const [isRevoking, setIsRevoking] = useState(false);
-
-  const loadData = async () => {
-    setIsLoading(true);
-    try {
-      const [credsRes, logsRes] = await Promise.all([
-        api.getQRCredentials(),
-        api.getAccessLogs()
-      ]);
-      setCredentials(credsRes.credentials);
-      setAccessLogs(logsRes.accessLogs);
-    } catch (err) {
-      console.error('Failed to load QR credential data:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+  const [credentials, setCredentials] = useState<any[]>([]); const [logs, setLogs] = useState<any[]>([]);
+  const [query, setQuery] = useState(''); const [results, setResults] = useState<any[]>([]); const [selected, setSelected] = useState<any | null>(null);
+  const [scannerOpen, setScannerOpen] = useState(false); const [issued, setIssued] = useState<any | null>(null); const [revoking, setRevoking] = useState<any | null>(null);
+  const [reason, setReason] = useState(''); const [working, setWorking] = useState(false);
+  const selectedEligibility = useMemo(() => eligibility(selected), [selected]);
+  const selectedActiveCredential = selected && credentials.find(c => c.student_id === selected.id && c.status === 'ACTIVE');
+  const load = async () => { const [c, l] = await Promise.all([api.getQRCredentials(), api.getAccessLogs()]); setCredentials(c.credentials); setLogs(l.accessLogs); };
+  useEffect(() => { load().catch(console.error); }, []);
   useEffect(() => {
-    loadData();
-  }, []);
-
-  const handleRevoke = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!revokingQR || !revokeReason.trim()) return;
-    setIsRevoking(true);
-    try {
-      await api.revokeQR(revokingQR.id, revokeReason.trim());
-      setRevokingQR(null);
-      setRevokeReason('');
-      await loadData();
-    } catch (err: any) {
-      alert(err.message || 'Failed to revoke QR credential');
-    } finally {
-      setIsRevoking(false);
-    }
+    const timer = window.setTimeout(() => api.getStudents({ search: query, limit: 20 }).then(r => setResults(r.students)).catch(console.error), 180);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+  const issue = async (reissue = false) => {
+    if (!selected) return; setWorking(true);
+    try { setIssued(await api.issueQRCredential(selected.id, reissue)); await load(); }
+    catch (e: any) { alert(e.message || 'Credential issuance failed. The server rechecked eligibility.'); }
+    finally { setWorking(false); }
   };
-
-  const handleReactivate = async (credentialId: string) => {
-    try {
-      await api.reactivateQR(credentialId);
-      await loadData();
-    } catch (err: any) {
-      alert(err.message || 'Failed to reactivate QR credential');
-    }
+  const revoke = async () => {
+    if (!revoking || reason.trim().length < 3) return; setWorking(true);
+    try { await api.revokeQR(revoking.id, reason.trim()); setRevoking(null); setReason(''); await load(); }
+    catch (e: any) { alert(e.message || 'Credential revocation failed.'); }
+    finally { setWorking(false); }
   };
-
-  return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">QR Digital Identity Passes</h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Issued only after verified payments and room allocations. Unpredictable cryptographic tokens are hashed and validated without exposing student details.
-          </p>
-        </div>
-
-        <button
-          onClick={() => setIsScannerOpen(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-brand-500 hover:bg-brand-600 text-slate-950 font-semibold rounded-xl text-xs shadow-sm transition"
-        >
-          <Camera className="w-4 h-4 text-slate-950" />
-          Launch Gate QR Scanner
-        </button>
-      </div>
-
-      {/* Security Architecture Info Banner */}
-      <div className="bg-slate-900 text-white rounded-2xl p-5 border border-slate-800 flex items-start gap-3.5 text-xs">
-        <ShieldCheck className="w-5 h-5 text-brand-400 shrink-0 mt-0.5" />
-        <div className="space-y-1">
-          <p className="font-bold text-white text-sm">Cryptographic Gate Identity Protocol</p>
-          <p className="text-slate-300">
-            • QR payloads contain only an unpredictable 32-byte cryptographic token.<br />
-            • Student personal information, phone number, and room numbers are never directly encoded in plain text within the QR image.<br />
-            • The gate scanner hashes incoming tokens with SHA-256 and matches against the database in real-time.<br />
-            • Digital passes can be instantly revoked by management for clearance holds.
-          </p>
-        </div>
-      </div>
-
-      {/* Digital Credentials Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-            <QrCode className="w-4 h-4 text-slate-500" />
-            Active & Issued Digital Passes
-          </h3>
-          <span className="text-xs text-slate-500">{credentials.length} Passes Minted</span>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase">
-              <tr>
-                <th className="py-3 px-4">Student</th>
-                <th className="py-3 px-4">Room & Facility</th>
-                <th className="py-3 px-4">Pass Status</th>
-                <th className="py-3 px-4">Token SHA-256 Hash</th>
-                <th className="py-3 px-4">Issued At</th>
-                <th className="py-3 px-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {credentials.map((c) => (
-                <tr key={c.id} className="hover:bg-slate-50/50 transition">
-                  <td className="py-3 px-4">
-                    <p className="font-bold text-slate-900">{c.student_name}</p>
-                    <p className="text-[11px] text-slate-500 font-mono">{c.phone_number}</p>
-                  </td>
-                  <td className="py-3 px-4">
-                    <span className="font-semibold text-slate-900">Room {c.room_number}</span>
-                    <p className="text-[11px] text-slate-500">{c.hostel_name}</p>
-                  </td>
-                  <td className="py-3 px-4">
-                    <StatusBadge status={c.status} size="sm" />
-                    {c.revoke_reason && (
-                      <p className="text-[10px] text-rose-600 mt-0.5 truncate max-w-[160px]">{c.revoke_reason}</p>
-                    )}
-                  </td>
-                  <td className="py-3 px-4 font-mono text-[11px] text-slate-500 max-w-xs truncate">
-                    {c.token_hash}
-                  </td>
-                  <td className="py-3 px-4 text-slate-500 text-[11px]">
-                    {new Date(c.issued_at).toLocaleDateString()}
-                  </td>
-                  <td className="py-3 px-4 text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button
-                        onClick={() => setPreviewQR(c)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-semibold transition"
-                      >
-                        <Eye className="w-3 h-3" /> View QR
-                      </button>
-                      {c.status === 'ACTIVE' ? (
-                        <button
-                          onClick={() => {
-                            setRevokingQR(c);
-                            setRevokeReason('');
-                          }}
-                          className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-semibold transition"
-                        >
-                          Revoke
-                        </button>
-                      ) : c.status === 'REVOKED' ? (
-                        <button
-                          onClick={() => handleReactivate(c.id)}
-                          className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-semibold transition"
-                        >
-                          Reactivate
-                        </button>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Security Gate Access Logs Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-slate-500" />
-            Gate Security Verification Logs
-          </h3>
-          <span className="text-xs text-slate-500">Live Checkpoint Audit</span>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase">
-              <tr>
-                <th className="py-3 px-4">Verification Time</th>
-                <th className="py-3 px-4">Student</th>
-                <th className="py-3 px-4">Method</th>
-                <th className="py-3 px-4">Gate Outcome</th>
-                <th className="py-3 px-4">Reason / Details</th>
-                <th className="py-3 px-4">Verified By</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {accessLogs.map((log) => (
-                <tr key={log.id} className="hover:bg-slate-50/50 transition">
-                  <td className="py-3 px-4 text-slate-500 whitespace-nowrap">
-                    {new Date(log.logged_at).toLocaleString()}
-                  </td>
-                  <td className="py-3 px-4 font-bold text-slate-900">
-                    {log.student_name || 'Unrecognised Token Holder'}
-                  </td>
-                  <td className="py-3 px-4 font-mono text-[11px] text-slate-600">
-                    {log.verification_method}
-                  </td>
-                  <td className="py-3 px-4">
-                    <StatusBadge status={log.outcome} size="sm" />
-                  </td>
-                  <td className="py-3 px-4 text-slate-600 max-w-xs truncate">
-                    {log.reason || '—'}
-                  </td>
-                  <td className="py-3 px-4 text-slate-500">
-                    @{log.verified_by_username || 'manager'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* QR Code Preview Modal */}
-      <Modal
-        isOpen={!!previewQR}
-        onClose={() => setPreviewQR(null)}
-        title={`Digital Identity Pass — ${previewQR?.student_name}`}
-        maxWidth="sm"
-      >
-        {previewQR && (
-          <div className="flex flex-col items-center text-center space-y-4">
-            {previewQR.qr_image_data ? (
-              <img
-                src={previewQR.qr_image_data}
-                alt="QR Code"
-                className="w-56 h-56 rounded-2xl bg-white border border-slate-200 p-2 shadow-md"
-              />
-            ) : (
-              <div className="w-56 h-56 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400">
-                No image data
-              </div>
-            )}
-
-            <div className="space-y-1">
-              <h4 className="font-bold text-base text-slate-900">{previewQR.student_name}</h4>
-              <p className="text-xs text-slate-600">
-                {previewQR.hostel_name} • Room {previewQR.room_number}
-              </p>
-              <StatusBadge status={previewQR.status} size="sm" />
-            </div>
-
-            <p className="text-[11px] text-slate-400 font-mono break-all px-2">
-              Hash: {previewQR.token_hash}
-            </p>
-          </div>
-        )}
-      </Modal>
-
-      {/* Revoke Pass Modal */}
-      <Modal
-        isOpen={!!revokingQR}
-        onClose={() => setRevokingQR(null)}
-        title={`Revoke Digital Pass — ${revokingQR?.student_name}`}
-        maxWidth="sm"
-      >
-        {revokingQR && (
-          <form onSubmit={handleRevoke} className="space-y-4">
-            <p className="text-xs text-slate-500">
-              Revoking this credential will immediately block access at all security checkpoints for <strong>{revokingQR.student_name}</strong>.
-            </p>
-
-            <div>
-              <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">
-                Revocation Reason (Audit Log Required)
-              </label>
-              <input
-                type="text"
-                value={revokeReason}
-                onChange={(e) => setRevokeReason(e.target.value)}
-                placeholder="e.g. Disciplinary hold, clearance suspension"
-                className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:outline-none"
-                required
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setRevokingQR(null)}
-                className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-medium text-slate-600"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={isRevoking || !revokeReason.trim()}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold transition disabled:opacity-50"
-              >
-                {isRevoking ? 'Revoking...' : 'Confirm Revocation'}
-              </button>
-            </div>
-          </form>
-        )}
-      </Modal>
-
-      {/* Live Scanner Modal */}
-      <QRScannerModal
-        isOpen={isScannerOpen}
-        onClose={() => setIsScannerOpen(false)}
-        onVerificationComplete={loadData}
-      />
-    </div>
-  );
+  return <div className="space-y-6">
+    <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-2xl font-bold text-slate-900">Resident QR credentials</h2><p className="mt-1 text-xs text-slate-500">Manager-authorized credentials with opaque verification URLs.</p></div><button onClick={() => setScannerOpen(true)} className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-xs font-semibold text-slate-950"><Camera className="w-4 h-4" />Gate scanner</button></div>
+    <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-xs text-slate-200"><ShieldCheck className="mr-2 inline w-5 text-brand-400" />The manager selector is informational only. The backend independently enforces allocation, payment, photo, and accommodation-date eligibility at issuance.</div>
+    <section className="rounded-2xl border border-slate-200 bg-white p-5"><h3 className="font-bold text-slate-900">Select resident for credential issuance</h3><p className="mt-1 text-xs text-slate-500">Search by name, phone, or department. Internal IDs are never shown or entered manually.</p><div className="relative mt-3"><Search className="absolute left-3 top-2.5 w-4 text-slate-400" /><input value={query} onChange={e => { setQuery(e.target.value); setSelected(null); }} placeholder="Search residents" className="w-full rounded-xl border border-slate-200 py-2 pl-9 pr-3 text-sm" /></div><div className="mt-2 max-h-64 overflow-auto rounded-xl border border-slate-100">{results.map(student => { const state = eligibility(student); return <button key={student.id} onClick={() => { setSelected(student); setQuery(student.full_name); }} className={`block w-full border-b p-3 text-left text-xs hover:bg-slate-50 ${selected?.id === student.id ? 'bg-brand-50' : ''}`}><div className="flex flex-wrap justify-between gap-2"><span className="font-semibold text-slate-900">{student.full_name}</span><span className={state.eligible ? 'text-emerald-700' : 'text-amber-700'}>{state.eligible ? 'Eligible' : 'Not yet eligible'}</span></div><div className="mt-1 text-slate-500">{student.phone_number} · {facilityName(student.current_allocation?.hostel_code)} · Room {student.current_allocation?.room_number || '—'}</div></button>; })}{results.length === 0 && <p className="p-3 text-xs text-slate-500">No matching residents.</p>}</div>
+      {selected && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold text-slate-900">{selected.full_name}</p><p className="text-xs text-slate-500">{selected.phone_number} · {facilityName(selected.current_allocation?.hostel_code)} · Room {selected.current_allocation?.room_number || '—'}</p></div><StatusBadge status={selectedEligibility.eligible ? 'VERIFIED' : 'PENDING'} size="sm" /></div><div className="mt-3 grid gap-2 text-xs md:grid-cols-3"><p><span className="text-slate-500">Payment:</span> {selected.payment?.status || 'NOT FOUND'}</p><p><span className="text-slate-500">Photograph:</span> {selected.photo_status || 'NOT SUBMITTED'}</p><p><span className="text-slate-500">Accommodation:</span> {formatDate(selected.current_allocation?.accommodation_start_date)} – {formatDate(selected.current_allocation?.accommodation_end_date)}</p></div>{selectedEligibility.eligible ? <p className="mt-3 text-xs text-emerald-700">All visible requirements are met. The backend will revalidate before issuing.</p> : <ul className="mt-3 list-disc pl-4 text-xs text-amber-800">{selectedEligibility.reasons.map(item => <li key={item}>{item}</li>)}</ul>}<div className="mt-4 flex flex-wrap gap-2"><button disabled={working || !selectedEligibility.eligible || !!selectedActiveCredential} onClick={() => issue(false)} className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Issue credential</button>{selectedActiveCredential && <button disabled={working || !selectedEligibility.eligible} onClick={() => issue(true)} className="rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold disabled:opacity-50">Reissue active credential</button>}</div></div>}</section>
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white"><div className="flex items-center justify-between border-b p-4"><h3 className="font-bold text-sm"><QrCode className="mr-2 inline w-4" />Credential history</h3><button onClick={() => load()} className="text-slate-500"><RefreshCw className="w-4" /></button></div><div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="bg-slate-50 text-slate-500"><tr><th className="p-3">Resident</th><th className="p-3">Current room</th><th className="p-3">Status</th><th className="p-3">Issued</th><th className="p-3 text-right">Action</th></tr></thead><tbody>{credentials.map(c => <tr key={c.id} className="border-t"><td className="p-3 font-semibold">{c.student_name}<div className="font-normal text-slate-500">{c.phone_number}</div></td><td className="p-3">{c.hostel_name || '—'} · {c.room_number || '—'}</td><td className="p-3"><StatusBadge status={c.status} size="sm" /><div className="mt-1 text-rose-600">{c.revoke_reason}</div></td><td className="p-3">{new Date(c.issued_at).toLocaleString()}</td><td className="p-3 text-right">{c.status === 'ACTIVE' && <button onClick={() => { setRevoking(c); setReason(''); }} className="rounded-lg bg-rose-50 px-2 py-1 font-semibold text-rose-700">Revoke</button>}</td></tr>)}</tbody></table></div></section>
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white"><div className="border-b p-4 font-bold text-sm">Verification audit</div><div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="bg-slate-50 text-slate-500"><tr><th className="p-3">Time</th><th className="p-3">Resident</th><th className="p-3">Channel</th><th className="p-3">Outcome</th><th className="p-3">Reason</th></tr></thead><tbody>{logs.map(log => <tr key={log.id} className="border-t"><td className="p-3">{new Date(log.logged_at).toLocaleString()}</td><td className="p-3">{log.student_name || 'Unknown'}</td><td className="p-3">{log.verification_channel}</td><td className="p-3"><StatusBadge status={log.outcome} size="sm" /></td><td className="p-3">{log.reason}</td></tr>)}</tbody></table></div></section>
+    <Modal isOpen={!!issued} onClose={() => setIssued(null)} title="Credential issued" maxWidth="sm">{issued && <div className="space-y-4 text-center"><img src={issued.qrImageData} alt="Resident verification QR code" className="mx-auto w-56 rounded-xl border p-2" /><p className="text-xs text-slate-600">Display or securely hand this QR to the resident now. It cannot be regenerated without an explicit reissue.</p></div>}</Modal>
+    <Modal isOpen={!!revoking} onClose={() => setRevoking(null)} title="Revoke credential" maxWidth="sm"><div className="space-y-3"><p className="text-xs text-slate-600">A reason is recorded in the credential and audit history.</p><input value={reason} onChange={e => setReason(e.target.value)} placeholder="Documented reason" className="w-full rounded-xl border p-2 text-sm" /><button disabled={working || reason.trim().length < 3} onClick={revoke} className="w-full rounded-xl bg-rose-600 p-2 text-xs font-semibold text-white disabled:opacity-50">Confirm revocation</button></div></Modal>
+    <QRScannerModal isOpen={scannerOpen} onClose={() => setScannerOpen(false)} onVerificationComplete={() => load()} />
+  </div>;
 };

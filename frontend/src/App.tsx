@@ -17,6 +17,7 @@ import { AuditLogsPage } from './pages/AuditLogsPage.js';
 import { WhatsAppSimulatorPage } from './pages/WhatsAppSimulatorPage.js';
 import { StudentPhotoUploadPage } from './pages/StudentPhotoUploadPage.js';
 import { PhotoReviewsPage } from './pages/PhotoReviewsPage.js';
+import { ResidentVerificationPage } from './pages/ResidentVerificationPage.js';
 
 function DashboardRouter() {
   const { user, isLoading } = useAuth();
@@ -56,6 +57,9 @@ function DashboardRouter() {
 
   const photoUploadMatch = currentPath.match(/^\/photo-upload\/([A-Za-z0-9_-]+)$/);
   if (photoUploadMatch) return <StudentPhotoUploadPage token={photoUploadMatch[1]} />;
+
+  const verificationMatch = currentPath.match(/^\/resident-verification\/([A-Za-z0-9_-]+)$/);
+  if (verificationMatch) return <ResidentVerificationPage token={verificationMatch[1]} />;
 
   if (!user) {
     return <LoginPage />;
