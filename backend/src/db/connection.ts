@@ -54,6 +54,14 @@ export function initSchema(db: Database.Database) {
     db.exec("ALTER TABLE students ADD COLUMN photo_status TEXT NOT NULL DEFAULT 'NOT_SUBMITTED'");
   }
 
+  const accessLogColumns = db.prepare("PRAGMA table_info(access_logs)").all() as any[];
+  if (!accessLogColumns.some(column => column.name === 'resident_qr_credential_id')) {
+    db.exec('ALTER TABLE access_logs ADD COLUMN resident_qr_credential_id TEXT REFERENCES resident_qr_credentials(id) ON DELETE SET NULL');
+  }
+  if (!accessLogColumns.some(column => column.name === 'verification_channel')) {
+    db.exec("ALTER TABLE access_logs ADD COLUMN verification_channel TEXT NOT NULL DEFAULT 'MANAGER'");
+  }
+
   // Preserve already-uploaded photographs when upgrading from the first photo
   // upload milestone into the review-history model.
   db.exec(`
