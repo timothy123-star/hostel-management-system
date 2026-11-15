@@ -88,11 +88,11 @@ export const PaymentsPage: React.FC = () => {
       <div>
         <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Student Payments & Manager Verification</h2>
         <p className="text-xs text-slate-500 mt-1">
-          Every student pays individually. Deposits are manually inspected and verified by the manager before room allocation is finalized.
+          Bank matching checks transaction details. Every payment still requires explicit manager approval before room allocation can be finalized.
         </p>
       </div>
 
-      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900"><strong>DEMO reconciliation workspace — NO REAL MONEY.</strong> Incoming records below are synthetic bank transactions. A manager must reconcile an exact payment reference and amount; screenshots or claims are not proof of payment.</div>
+      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900"><strong>DEMO reconciliation workspace — NO REAL MONEY.</strong> Incoming records below are synthetic bank transactions. A manager must reconcile an exact payment reference and amount, then explicitly approve the student payment; reconciliation alone is not approval.</div>
 
       {/* Filter Bar */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-4 shadow-sm">
@@ -126,7 +126,7 @@ export const PaymentsPage: React.FC = () => {
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b"><h3 className="font-bold text-sm">Incoming Demo Bank Transactions</h3></div>
         <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="bg-slate-50 text-slate-500 uppercase"><tr><th className="p-3">Bank transaction</th><th className="p-3">Payment reference / student</th><th className="p-3">Amount</th><th className="p-3">Beneficiary</th><th className="p-3">Status</th><th className="p-3"></th></tr></thead><tbody>
-          {transactions.map(txn => <tr key={txn.id} className="border-t"><td className="p-3 font-mono">{txn.bank_transaction_reference}<br/><span className="text-slate-400">{new Date(txn.transaction_timestamp).toLocaleString()}</span></td><td className="p-3">{txn.payment_reference}<br/><span className="text-slate-500">{txn.student_name || 'No proposed payment'}</span></td><td className="p-3 font-semibold">${txn.amount} {txn.currency}</td><td className="p-3">{txn.beneficiary_account}</td><td className="p-3"><StatusBadge status={txn.reconciliation_status} size="sm" /><p className="text-rose-600">{txn.exception_reason}</p></td><td className="p-3 text-right">{txn.reconciliation_status === 'PENDING_RECONCILIATION' && <div className="flex gap-1 justify-end"><button onClick={async () => { try { await api.reconcileDemoTransaction(txn.id); await loadPayments(); } catch (e: any) { alert(e.message); await loadPayments(); } }} className="px-2 py-1 bg-emerald-600 text-white rounded">Reconcile & Verify</button><button onClick={async () => { const reason = window.prompt('Exception/rejection reason'); if (reason) { await api.rejectDemoTransaction(txn.id, reason); await loadPayments(); } }} className="px-2 py-1 bg-slate-100 rounded">Flag</button></div>}</td></tr>)}
+          {transactions.map(txn => <tr key={txn.id} className="border-t"><td className="p-3 font-mono">{txn.bank_transaction_reference}<br/><span className="text-slate-400">{new Date(txn.transaction_timestamp).toLocaleString()}</span></td><td className="p-3">{txn.payment_reference}<br/><span className="text-slate-500">{txn.student_name || 'No proposed payment'}</span></td><td className="p-3 font-semibold">${txn.amount} {txn.currency}</td><td className="p-3">{txn.beneficiary_account}</td><td className="p-3"><StatusBadge status={txn.reconciliation_status} size="sm" /><p className="text-rose-600">{txn.exception_reason}</p></td><td className="p-3 text-right">{txn.reconciliation_status === 'PENDING_RECONCILIATION' && <div className="flex gap-1 justify-end"><button onClick={async () => { try { await api.reconcileDemoTransaction(txn.id); await loadPayments(); } catch (e: any) { alert(e.message); await loadPayments(); } }} className="px-2 py-1 bg-emerald-600 text-white rounded">Reconcile transaction</button><button onClick={async () => { const reason = window.prompt('Exception/rejection reason'); if (reason) { await api.rejectDemoTransaction(txn.id, reason); await loadPayments(); } }} className="px-2 py-1 bg-slate-100 rounded">Flag</button></div>}</td></tr>)}
         </tbody></table></div>
       </div>
 
@@ -166,7 +166,9 @@ export const PaymentsPage: React.FC = () => {
                   </td>
                   <td className="py-3 px-4 text-slate-500 text-[11px] max-w-xs truncate">
                     {p.status === 'VERIFIED' ? (
-                      <span>Verified: {p.verified_at ? new Date(p.verified_at).toLocaleDateString() : 'Yes'} ({p.notes || 'No notes'})</span>
+                      <span>Manager approved: {p.verified_at ? new Date(p.verified_at).toLocaleDateString() : 'Yes'} ({p.notes || 'No notes'})</span>
+                    ) : p.status === 'PENDING' && p.reconciliation_status === 'RECONCILED' ? (
+                      <span className="text-amber-700 font-medium">Bank matched — awaiting manager approval</span>
                     ) : p.notes ? (
                       p.notes
                     ) : (
@@ -183,7 +185,7 @@ export const PaymentsPage: React.FC = () => {
                           }}
                           className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition"
                         >
-                          Verify
+                          Approve
                         </button>
                         <button
                           onClick={() => setRejectingPayment(p)}
@@ -207,7 +209,7 @@ export const PaymentsPage: React.FC = () => {
       <Modal
         isOpen={!!verifyingPayment}
         onClose={() => setVerifyingPayment(null)}
-        title="Verify Student Individual Payment"
+        title="Approve Student Individual Payment"
         maxWidth="sm"
       >
         {verifyingPayment && (
@@ -221,7 +223,7 @@ export const PaymentsPage: React.FC = () => {
 
             <div>
               <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">
-                Verification Notes / Bank Receipt Ref (DEMO)
+                Manager Approval Notes / Payment Evidence (DEMO)
               </label>
               <input
                 type="text"
@@ -245,7 +247,7 @@ export const PaymentsPage: React.FC = () => {
                 disabled={isVerifying}
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold transition"
               >
-                {isVerifying ? 'Verifying...' : 'Confirm Verification'}
+                {isVerifying ? 'Approving...' : 'Confirm Manager Approval'}
               </button>
             </div>
           </form>

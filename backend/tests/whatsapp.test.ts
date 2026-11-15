@@ -10,7 +10,7 @@ describe('WhatsApp Conversational Assistant & Simulator', () => {
     SimulatorProvider.clearHistory();
   });
 
-  it('renders interactive menu with Show my QR code button and responds to MENU command', async () => {
+  it('renders interactive list menu with stable row IDs and responds to MENU command', async () => {
     const testPhone = '+14440001111';
     await ConversationHandler.processIncomingMessage({
       messageId: 'msg-001',
@@ -22,8 +22,16 @@ describe('WhatsApp Conversational Assistant & Simulator', () => {
     expect(history.length).toBeGreaterThan(0);
     const reply = history[0];
     expect(reply.type).toBe('interactive');
-    expect(reply.buttons).toBeDefined();
-    expect(reply.buttons?.some(b => b.title === 'Show my QR code')).toBe(true);
+    const rows = (((reply as any).listSections?.flatMap((s: any) => s.rows) ?? reply.buttons ?? []) as { id: string; title: string }[]);
+    for (const row of [
+      { id: 'menu_book', title: 'Book accommodation' },
+      { id: 'menu_status', title: 'Booking status' },
+      { id: 'menu_qr', title: 'Show QR pass' },
+      { id: 'menu_payment', title: 'Payment instructions' },
+      { id: 'menu_help', title: 'Help' },
+    ]) {
+      expect(rows.some((r) => r.id === row.id && r.title === row.title)).toBe(true);
+    }
   });
 
   it('never silently issues a QR credential from the Show my QR button', async () => {

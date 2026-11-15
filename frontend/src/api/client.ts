@@ -83,9 +83,11 @@ export const api = {
   issueStudentPhotoUploadLink: (studentId: string) => apiRequest<{ upload_url: string; expires_at: string; delivery: 'SIMULATED' }>(`/students/${studentId}/photo-upload-link`, { method: 'POST' }),
   getPhotoReviews: (status = 'PENDING_REVIEW') => apiRequest<{ reviews: any[] }>(`/photo-reviews?status=${encodeURIComponent(status)}`),
   getPhotoReviewHistory: (studentId: string) => apiRequest<{ history: any[] }>(`/photo-reviews/${studentId}/history`),
-  approvePhoto: (studentId: string) => apiRequest<{ review: any }>(`/photo-reviews/${studentId}/approve`, { method: 'POST' }),
-  rejectPhoto: (studentId: string, reason: string) => apiRequest<{ review: any }>(`/photo-reviews/${studentId}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  approvePhoto: (studentId: string, submissionId?: string) => apiRequest<{ review: any }>(`/photo-reviews/${studentId}/approve`, { method: 'POST', body: JSON.stringify({ submission_id: submissionId }) }),
+  rejectPhoto: (studentId: string, reason: string, submissionId?: string) => apiRequest<{ review: any }>(`/photo-reviews/${studentId}/reject`, { method: 'POST', body: JSON.stringify({ reason, submission_id: submissionId }) }),
   requestReplacementPhoto: (studentId: string) => apiRequest<{ upload_url: string; expires_at: string }>(`/photo-reviews/${studentId}/request-replacement`, { method: 'POST' }),
+  getPhotoDisplayConsent: (studentId: string) => apiRequest<{ consent: any; history: any[] }>(`/photo-display-consent/${encodeURIComponent(studentId)}`),
+  withdrawPhotoDisplayConsent: (studentId: string, reason?: string) => apiRequest<{ consent: any }>(`/photo-display-consent/${encodeURIComponent(studentId)}/withdraw`, { method: 'POST', body: JSON.stringify({ reason }) }),
 
   // Booking Groups & Queue
   getBookingGroups: (hostel?: string, status?: string) => {
@@ -154,6 +156,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ token, method })
     }),
+  getStaffVerification: (token: string) =>
+    apiRequest<any>(`/qr/staff/${encodeURIComponent(token)}`),
+  fetchStaffPhoto: async (photoUrl: string): Promise<string> => {
+    const adminToken = localStorage.getItem('hostel_admin_token');
+    const response = await fetch(photoUrl, {
+      headers: adminToken ? { Authorization: `Bearer ${adminToken}` } : {},
+      cache: 'no-store'
+    });
+    if (!response.ok) throw new Error('Approved photograph is unavailable.');
+    return URL.createObjectURL(await response.blob());
+  },
   getQRCredentials: () => apiRequest<{ credentials: any[] }>('/qr/credentials'),
   issueQRCredential: (studentId: string, reissue = false) =>
     apiRequest<any>(`/qr/credentials/${studentId}/issue`, { method: 'POST', body: JSON.stringify({ reissue }) }),
@@ -195,6 +208,10 @@ export const api = {
 
   // WhatsApp
   getWhatsAppStatus: () => apiRequest<{ status: any }>('/whatsapp/status'),
+  getInboxFailures: (limit = 20, offset = 0) =>
+    apiRequest<{ failed_count: number; retryable_count: number; received_count: number; failures: any[]; limit: number; offset: number }>(
+      `/whatsapp/inbox/failures?limit=${limit}&offset=${offset}`
+    ),
   getSimulatorHistory: (phone?: string) =>
     apiRequest<{ history: any[] }>(`/whatsapp/simulator/history${phone ? `?phone=${encodeURIComponent(phone)}` : ''}`),
   sendSimulatorMessage: (data: { from: string; textBody?: string; buttonId?: string }) =>

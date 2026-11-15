@@ -11,6 +11,7 @@ export const PhotoReviewsPage: React.FC = () => {
   const [history, setHistory] = useState<any[]>([]);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [reason, setReason] = useState('');
+  const [consent, setConsent] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
 
@@ -19,14 +20,15 @@ export const PhotoReviewsPage: React.FC = () => {
   useEffect(() => () => { if (imageUrl) URL.revokeObjectURL(imageUrl); }, [imageUrl]);
 
   const open = async (review: any) => {
-    setSelected(review); setError(null); setReason(''); setImageUrl(null);
+    setSelected(review); setError(null); setReason(''); setImageUrl(null); setConsent(null);
     try {
       const [historyResult, photoResponse] = await Promise.all([
         api.getPhotoReviewHistory(review.student_id),
-        fetch(`/api/photo-reviews/${encodeURIComponent(review.student_id)}/image`, { headers: { Authorization: `Bearer ${localStorage.getItem('hostel_admin_token')}` } })
+        fetch(`/api/photo-reviews/${encodeURIComponent(review.student_id)}/image?submission_id=${encodeURIComponent(review.submission_id)}`, { headers: { Authorization: `Bearer ${localStorage.getItem('hostel_admin_token')}` } })
       ]);
       if (!photoResponse.ok) throw new Error((await photoResponse.json()).error);
       setHistory(historyResult.history); setImageUrl(URL.createObjectURL(await photoResponse.blob()));
+      try { setConsent((await api.getPhotoDisplayConsent(review.student_id)).consent); } catch { setConsent(null); }
     } catch (e: any) { setError(e.message || 'Unable to load the private photograph.'); }
   };
 
@@ -34,7 +36,7 @@ export const PhotoReviewsPage: React.FC = () => {
     if (!selected || (decision === 'REJECTED' && !reason.trim())) { setError('A rejection reason is required.'); return; }
     setWorking(true); setError(null);
     try {
-      if (decision === 'APPROVED') await api.approvePhoto(selected.student_id); else await api.rejectPhoto(selected.student_id, reason.trim());
+      if (decision === 'APPROVED') await api.approvePhoto(selected.student_id, selected.submission_id); else await api.rejectPhoto(selected.student_id, reason.trim(), selected.submission_id);
       setSelected(null); await load();
     } catch (e: any) { setError(e.message || 'Unable to record the review.'); } finally { setWorking(false); }
   };
@@ -54,6 +56,7 @@ export const PhotoReviewsPage: React.FC = () => {
         {error && <p className={`rounded-lg p-2 text-xs ${error.includes('sent through') ? 'bg-sky-50 text-sky-800' : 'bg-rose-50 text-rose-800'}`}>{error}</p>}
         {selected.photo_status === 'PENDING_REVIEW' && <><textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="Rejection reason (required only if rejecting)" className="w-full rounded-xl border border-slate-200 p-3 text-sm" /><div className="flex justify-end gap-2"><button disabled={working} onClick={() => decide('REJECTED')} className="inline-flex items-center gap-1 rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white"><X className="w-4 h-4" /> Reject</button><button disabled={working} onClick={() => decide('APPROVED')} className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white"><Check className="w-4 h-4" /> Approve</button></div></>}
         {selected.photo_status === 'REJECTED' && <button disabled={working} onClick={replacement} className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white">Authorize replacement link</button>}
+        <div className="rounded-xl border border-slate-200 p-3 text-xs"><h4 className="font-bold text-sm text-slate-900 mb-1">QR photo-display permission</h4><p className="text-slate-500">Granted automatically when the resident uploads a photograph after the upload disclosure — there is no separate consent step. The photo appears on scans only when permission is GRANTED, the pass is ACTIVE and within validity, and the current photo is APPROVED. Use Withdraw to immediately hide the photo (takedown).</p><p className="mt-1">Current: <strong>{consent ? `${consent.decision}${consent.decidedAt ? ` (${new Date(consent.decidedAt).toLocaleString()})` : ''}` : 'NONE — withheld'}</strong></p><div className="mt-2 flex gap-2"><button disabled={working} onClick={async () => { if (!selected) return; const r = window.prompt('Withdrawal reason (recorded in audit)'); if (!r) return; setWorking(true); try { setConsent((await api.withdrawPhotoDisplayConsent(selected.student_id, r)).consent); } catch (e: any) { setError(e.message); } finally { setWorking(false); } }} className="rounded-lg bg-slate-100 px-3 py-1.5 font-semibold">Withdraw</button></div></div>
         <div><h4 className="font-bold text-sm text-slate-900 mb-2">Review history</h4><div className="space-y-2">{history.map(item => <div key={item.id} className="rounded-lg border border-slate-100 bg-slate-50 p-2 text-xs"><strong>{item.status.replace(/_/g, ' ')}</strong> — submitted {new Date(item.submitted_at).toLocaleString()}{item.reviewed_at && <>; reviewed by {item.reviewer_name || 'manager'} on {new Date(item.reviewed_at).toLocaleString()}</>}{item.rejection_reason && <p className="mt-1 text-rose-700">Reason: {item.rejection_reason}</p>}</div>)}</div></div>
       </div>}
     </Modal>

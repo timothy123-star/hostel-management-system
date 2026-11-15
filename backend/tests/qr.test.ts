@@ -4,6 +4,7 @@ import path from 'path';
 import { getDb } from '../src/db/connection.js';
 import { runSeed } from '../src/db/seed.js';
 import { QRService } from '../src/services/qrService.js';
+import { PhotoDisplayConsentService } from '../src/services/photoDisplayConsentService.js';
 import { config } from '../src/config.js';
 
 const studentId = 'stu-demo-01';
@@ -61,6 +62,7 @@ describe('resident QR credentials', () => {
 
   it('delivers an approved photograph only while the credential remains valid', async () => {
     await approveCurrentPhoto();
+    PhotoDisplayConsentService.recordDecision({ studentId, decision: 'GRANTED', decidedBy: 'MANAGER', adminId, notes: 'qr.test fixture: resident consented to public photo display' });
     fs.mkdirSync(config.photoStorageDir, { recursive: true });
     fs.writeFileSync(path.join(config.photoStorageDir, 'qr-test-photo.jpg'), Buffer.from('test-photo'));
     const issued = QRService.issueCredential(studentId, adminId);

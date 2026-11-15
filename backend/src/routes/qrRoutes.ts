@@ -6,16 +6,46 @@ import { z } from 'zod';
 
 export const qrRouter = Router();
 
-// These routes deliberately precede authenticated manager routes. The token is
-// the opaque bearer credential; no identity data is returned for an invalid pass.
-qrRouter.get('/public/:token', (req, res, next) => {
-  try { res.set('Cache-Control', 'no-store'); res.json(QRService.getPublicVerification(req.params.token)); } catch (err) { next(err); }
+function publicSecurityHeaders(res: any) {
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
+    Pragma: 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+  });
+}
+
+// Lightweight in-memory rate limiter for staff verification reads (avoids new deps).
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+function staffRateLimit(req: any, res: any, next: any) {
+  const ip = String(req.ip || req.headers['x-forwarded-for'] || 'unknown');
+  const now = Date.now();
+  const entry = rateBuckets.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rateBuckets.set(ip, { count: 1, resetAt: now + 60_000 });
+    return next();
+  }
+  entry.count += 1;
+  if (entry.count > 60) {
+    res.status(429).json({ status: 'INVALID_CREDENTIAL', reason: 'Too many attempts. Try again shortly.' });
+    return;
+  }
+  next();
+}
+
+// Staff-only identity and photograph retrieval. Every route here requires an
+// authenticated staff session (authMiddleware): possession of the QR credential
+// alone never returns resident information. The QR code itself carries only the
+// opaque credential; the photograph is served through the authenticated photo
+// endpoint below, never embedded in the code or exposed anonymously.
+qrRouter.get('/staff/:token', authMiddleware, staffRateLimit, (req: AuthenticatedRequest, res, next) => {
+  try { publicSecurityHeaders(res); res.json(QRService.getPublicVerification(req.params.token, 'MANAGER', req.admin?.id)); } catch (err) { next(err); }
 });
 
-qrRouter.get('/public/:token/photo', (req, res, next) => {
+qrRouter.get('/staff/:token/photo', authMiddleware, staffRateLimit, (req: AuthenticatedRequest, res, next) => {
   try {
-    const photo = QRService.getVerifiedPhoto(req.params.token);
-    res.set({ 'Content-Type': photo.mimeType, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
+    const photo = QRService.getVerifiedPhoto(req.params.token, 'MANAGER', req.admin?.id);
+    res.set({ 'Content-Type': photo.mimeType, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
     res.sendFile(photo.storagePath);
   } catch (err) { next(err); }
 });

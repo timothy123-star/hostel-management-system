@@ -73,6 +73,44 @@ CREATE TABLE IF NOT EXISTS student_photo_submissions (
 CREATE INDEX IF NOT EXISTS idx_photo_submissions_review ON student_photo_submissions(status, submitted_at);
 CREATE INDEX IF NOT EXISTS idx_photo_submissions_student ON student_photo_submissions(student_id, submitted_at);
 
+
+-- Tracks requests for students to submit photographs directly through WhatsApp.
+CREATE TABLE IF NOT EXISTS student_photo_requests (
+  id TEXT PRIMARY KEY,
+
+  student_id TEXT NOT NULL
+    REFERENCES students(id) ON DELETE CASCADE,
+
+  source TEXT NOT NULL
+    CHECK (source IN ('STUDENT', 'MANAGER')),
+
+  requested_by_admin_id TEXT
+    REFERENCES admin_users(id) ON DELETE SET NULL,
+
+  status TEXT NOT NULL DEFAULT 'PENDING'
+    CHECK (status IN ('PENDING', 'FULFILLED', 'CANCELLED', 'EXPIRED')),
+
+  requested_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  fulfilled_at TEXT,
+
+  submission_id TEXT UNIQUE
+    REFERENCES student_photo_submissions(id) ON DELETE SET NULL
+);
+
+-- A student may have only one pending photo request at a time.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_student_photo_one_pending_request
+ON student_photo_requests(student_id)
+WHERE status = 'PENDING';
+
+-- Supports retrieving request history for an individual student.
+CREATE INDEX IF NOT EXISTS idx_student_photo_requests_student
+ON student_photo_requests(student_id, requested_at);
+
+-- Supports finding requests awaiting photographs or requiring expiry.
+CREATE INDEX IF NOT EXISTS idx_student_photo_requests_status_expiry
+ON student_photo_requests(status, expires_at);
+
 -- Secure, single-use links. Raw tokens are never persisted.
 CREATE TABLE IF NOT EXISTS student_photo_upload_links (
   id TEXT PRIMARY KEY,
@@ -219,6 +257,7 @@ CREATE TABLE IF NOT EXISTS resident_qr_credentials (
   revoke_reason TEXT,
   reissued_from_credential_id TEXT REFERENCES resident_qr_credentials(id) ON DELETE SET NULL,
   last_verified_at TEXT,
+  token_ciphertext TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -324,3 +363,92 @@ CREATE TABLE IF NOT EXISTS whatsapp_processed_messages (
   processed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_wa_msg_id ON whatsapp_processed_messages(message_id);
+
+-- 19. WhatsApp inbound inbox (durable, retryable pre-processing queue).
+-- Webhook payloads are persisted here BEFORE the HTTP 200 acknowledgement;
+-- the worker marks rows PROCESSED only after successful handling.
+CREATE TABLE IF NOT EXISTS whatsapp_inbound_inbox (
+  id TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL UNIQUE,
+  from_number TEXT NOT NULL,
+  text_body TEXT,
+  button_id TEXT,
+  has_image INTEGER NOT NULL DEFAULT 0,
+  image_id TEXT,
+  image_mime TEXT,
+  message_type TEXT NOT NULL DEFAULT 'text',
+  status TEXT NOT NULL DEFAULT 'RECEIVED' CHECK (status IN ('RECEIVED', 'PROCESSING', 'PROCESSED', 'RETRYABLE', 'FAILED')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_wa_inbox_status ON whatsapp_inbound_inbox(status, next_attempt_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_wa_inbox_message ON whatsapp_inbound_inbox(message_id);
+
+
+-- LLM_4123256751313927_LBzSxS8KWm-lDIJGoDXjWfQaKe0
+-- 11. WhatsApp resident notification outbox (durable, idempotent).
+CREATE TABLE IF NOT EXISTS whatsapp_notifications (
+  id TEXT PRIMARY KEY,
+  dedupe_key TEXT NOT NULL UNIQUE,
+  student_id TEXT REFERENCES students(id) ON DELETE SET NULL,
+  phone_number TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('PAYMENT_APPROVED','PAYMENT_REJECTED','PHOTO_APPROVED','PHOTO_REJECTED','QR_ISSUED')),
+  body_text TEXT NOT NULL,
+  template_name TEXT,
+  template_params TEXT,
+  status TEXT NOT NULL DEFAULT 'QUEUED' CHECK (status IN ('QUEUED','SENT','FAILED','PENDING_TEMPLATE')),
+  meta_message_id TEXT,
+  error TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  sent_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_wa_notifications_status ON whatsapp_notifications(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_wa_notifications_student ON whatsapp_notifications(student_id, created_at);
+
+-- Explicit, separately auditable consent for public QR photo display.
+-- Submission/approval consent does NOT imply display consent.
+CREATE TABLE IF NOT EXISTS photo_display_consents (
+  id TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  purpose TEXT NOT NULL DEFAULT 'QR_VERIFICATION_DISPLAY' CHECK (purpose = 'QR_VERIFICATION_DISPLAY'),
+  decision TEXT NOT NULL CHECK (decision IN ('GRANTED','DECLINED','WITHDRAWN')),
+  decided_by TEXT NOT NULL CHECK (decided_by IN ('RESIDENT','MANAGER')),
+  decided_by_admin_id TEXT REFERENCES admin_users(id) ON DELETE SET NULL,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_photo_display_consents_student ON photo_display_consents(student_id, created_at);
+
+-- Durable record that the photo-display disclosure (PHOTO_UPLOAD_DISCLOSURE_VERSION)
+-- was shown to a WhatsApp sender before their photograph was accepted. An upload
+-- only records display permission when a row for the current disclosure version
+-- already exists; the first image after registration therefore triggers the
+-- disclosure plus a resend request instead of being processed silently.
+
+-- 20. WhatsApp conversation archives (durable record of losing rows).
+-- Migrate-on-read never deletes a conversation row without archiving it
+-- here first, in the same transaction.
+CREATE TABLE IF NOT EXISTS whatsapp_photo_disclosures (
+  phone_number TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  disclosure_version TEXT NOT NULL,
+  shown_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_wa_photo_disclosures_student ON whatsapp_photo_disclosures(student_id, shown_at);
+
+CREATE TABLE IF NOT EXISTS whatsapp_conversation_archives (
+  id TEXT PRIMARY KEY,
+  archived_conversation_id TEXT NOT NULL,
+  phone_number TEXT NOT NULL,
+  current_state TEXT NOT NULL,
+  state_payload TEXT NOT NULL DEFAULT '{}',
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_wa_conv_archives_phone ON whatsapp_conversation_archives(phone_number, created_at);

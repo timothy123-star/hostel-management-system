@@ -90,6 +90,71 @@ export class MetaCloudProvider implements WhatsAppProvider {
     return this.sendPayload(payload);
   }
 
+  async sendListMenu(to: string, bodyText: string, buttonText: string, sections: { title?: string; rows: { id: string; title: string; description?: string }[] }[]): Promise<any> {
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: this.cleanPhoneNumber(to),
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        body: { text: bodyText.slice(0, 1024) },
+        footer: { text: 'HostelOS • DEMO, no real money' },
+        action: {
+          button: buttonText.slice(0, 20),
+          sections: sections.map((s, i) => ({
+            title: (s.title || `Options ${i + 1}`).slice(0, 24),
+            rows: s.rows.slice(0, 10).map(r => ({ id: r.id, title: r.title.slice(0, 24), description: (r.description || '').slice(0, 72) }))
+          }))
+        }
+      }
+    };
+    return this.sendPayload(payload);
+  }
+
+  async sendTemplateMessage(to: string, templateName: string, languageCode: string, bodyParams: string[]): Promise<any> {
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: this.cleanPhoneNumber(to),
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: languageCode },
+        components: bodyParams && bodyParams.length ? [{ type: 'body', parameters: bodyParams.map(t => ({ type: 'text', text: String(t).slice(0, 200) })) }] : []
+      }
+    };
+    return this.sendPayload(payload);
+  }
+
+  async sendImageBuffer(to: string, pngBuffer: Buffer, caption?: string): Promise<any> {
+    if (!this.isLive()) throw new Error('Meta WhatsApp Cloud API credentials not configured.');
+    const mediaId = await this.uploadMedia(pngBuffer, 'image/png');
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: this.cleanPhoneNumber(to),
+      type: 'image',
+      image: { id: mediaId, caption: caption || undefined }
+    };
+    return this.sendPayload(payload);
+  }
+
+  private async uploadMedia(buffer: Buffer, mimeType: string): Promise<string> {
+    const form = new FormData();
+    form.append('messaging_product', 'whatsapp');
+    form.append('file', new Blob([new Uint8Array(buffer)], { type: mimeType }), 'qr-pass.png');
+    form.append('type', mimeType);
+    const url = `https://graph.facebook.com/${config.meta.graphApiVersion}/${this.phoneNumberId}/media`;
+    const response = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${this.token}` }, body: form as any });
+    const data = await response.json() as any;
+    if (!response.ok || !data?.id) {
+      console.error('Meta Cloud Media Upload Error:', data);
+      throw new Error(data?.error?.message || 'QR image upload failed; credential remains valid.');
+    }
+    return data.id as string;
+  }
+
   async sendImageMessage(to: string, imageUrl: string, caption?: string): Promise<any> {
     const payload = {
       messaging_product: 'whatsapp',

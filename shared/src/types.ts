@@ -337,3 +337,11 @@ export interface WhatsAppProviderStatus {
   public_base_url: string;
   graph_api_version: string;
 }
+
+export type WhatsAppNotificationStatus = 'QUEUED' | 'SENT' | 'FAILED' | 'PENDING_TEMPLATE';
+export type WhatsAppNotificationKind =
+  | 'PAYMENT_APPROVED'
+  | 'PAYMENT_REJECTED'
+  | 'PHOTO_APPROVED'
+  | 'PHOTO_REJECTED'
+  | 'QR_ISSUED';

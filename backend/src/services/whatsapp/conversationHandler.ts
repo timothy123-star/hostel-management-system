@@ -5,24 +5,49 @@ import { StudentService } from '../studentService.js';
 import { BookingGroupService } from '../bookingGroupService.js';
 import { QRService } from '../qrService.js';
 import { PaymentService } from '../paymentService.js';
-import { WhatsAppState, RoomCapacity, HostelCode } from '@hostel/shared';
+import {
+  WhatsAppState,
+  RoomCapacity,
+  HostelCode,
+  FullNameSchema,
+  DepartmentSchema,
+  AcademicLevelSchema,
+  GroupInviteCodeSchema,
+  StudentRegistrationSchema,
+  normalizePhoneNumber,
+  isValidCanonicalPhone,
+  phoneLookupCandidates,
+} from '@hostel/shared';
 import { config } from '../../config.js';
+import { PHOTO_UPLOAD_DISCLOSURE_VERSION } from '../photoDisplayConsentService.js';
 
 export class ConversationHandler {
   /**
-   * Retrieves or initializes conversation state for a phone number
+   * Retrieves or initializes conversation state for a phone number.
+   * Lookup covers canonical and legacy stored forms (see
+   * phoneLookupCandidates) so rows written before phone canonicalization
+   * are resumed instead of stranded. A legacy-keyed row is atomically
+   * migrated to the canonical key on read.
    */
   static getConversation(phone: string): { state: WhatsAppState; payload: Record<string, any> } {
-    const db = getDb();
-    const row = db.prepare('SELECT * FROM whatsapp_conversations WHERE phone_number = ?').get(phone) as any;
+    const row = this.findConversationRow(phone);
     if (!row) {
+      const db = getDb();
       const now = new Date().toISOString();
       const id = `conv-${crypto.randomUUID()}`;
+      // INSERT OR IGNORE: concurrent first-messages for the same sender
+      // race on UNIQUE(phone_number); the loser re-reads the winner below
+      // instead of corrupting state or throwing.
       db.prepare(`
-        INSERT INTO whatsapp_conversations (id, phone_number, current_state, state_payload, last_active_at, created_at, updated_at)
+        INSERT OR IGNORE INTO whatsapp_conversations (id, phone_number, current_state, state_payload, last_active_at, created_at, updated_at)
         VALUES (?, ?, 'IDLE', '{}', ?, ?, ?)
       `).run(id, phone, now, now, now);
-      return { state: 'IDLE', payload: {} };
+      const created = this.findConversationRow(phone);
+      if (!created) return { state: 'IDLE', payload: {} };
+      return {
+        state: created.current_state as WhatsAppState,
+        payload: JSON.parse(created.state_payload || '{}')
+      };
     }
     return {
       state: row.current_state as WhatsAppState,
@@ -30,14 +55,128 @@ export class ConversationHandler {
     };
   }
 
+  /**
+   * Registration progression order, following the real state machine:
+   * name -> gender -> department -> level -> occupancy -> roommate choice
+   * -> triple auto-complete consent -> invite code / random consent.
+   * AWAITING_INVITE_CODE and AWAITING_RANDOM_CONSENT are both terminal
+   * pre-registration steps (rank 8). Higher rank always wins over a lower
+   * rank; timestamps only break ties within the same rank. Unknown states
+   * rank lowest and never beat a known state.
+   */
+  private static readonly CONVERSATION_STATE_PROGRESS: Record<string, number> = {
+    IDLE: 0,
+    AWAITING_NAME: 1,
+    AWAITING_GENDER: 2,
+    AWAITING_DEPT: 3,
+    AWAITING_LEVEL: 4,
+    AWAITING_OCCUPANCY: 5,
+    AWAITING_ROOMMATE_CHOICE: 6,
+    AWAITING_AUTO_COMPLETE_CONSENT: 7,
+    AWAITING_INVITE_CODE: 8,
+    AWAITING_RANDOM_CONSENT: 8,
+  };
+
+  /**
+   * Locates a conversation row by any known representation of the number.
+   * Lookup covers canonical and legacy stored forms (see
+   * phoneLookupCandidates) so rows written before phone canonicalization
+   * are resumed instead of stranded. A legacy-keyed row is atomically
+   * migrated to the canonical key on read.
+   *
+   * Collision resolution: the genuinely further-progressed registration
+   * state wins (see CONVERSATION_STATE_PROGRESS), not the newest
+   * timestamp. Timestamps only break ties between rows at the same
+   * progression rank — including same-state rows with divergent payloads,
+   * where the most recently active row wins. Losing rows are never
+   * silently discarded: each is archived with its full original state and
+   * payload in the same transaction before deletion.
+   */
+  private static findConversationRow(phone: string): any {
+    const db = getDb();
+    const candidates = phoneLookupCandidates(phone);
+    const placeholders = candidates.map(() => '?').join(', ');
+    const rows = db.prepare(
+      `SELECT * FROM whatsapp_conversations WHERE phone_number IN (${placeholders})`
+    ).all(...candidates) as any[];
+    // Legacy rows may use separator formatting (e.g. "(234) 801-234-5679")
+    // that no candidate reproduces exactly. Fall back to a digits-only
+    // comparison, mirroring findStudentByWhatsAppSender. The conversations
+    // table holds one row per sender and stays small.
+    const digits = (phone || '').replace(/[^0-9]/g, '');
+    if (digits.length >= 7) {
+      const scanned = db.prepare('SELECT * FROM whatsapp_conversations').all() as any[];
+      for (const row of scanned) {
+        const rowDigits = (row.phone_number || '').replace(/[^0-9]/g, '');
+        if (rowDigits === digits && !rows.some((r: any) => r.id === row.id)) {
+          rows.push(row);
+        }
+      }
+    }
+    if (rows.length === 0) return null;
+    if (rows.length === 1) {
+      const only = rows[0];
+      if (only.phone_number !== phone) this.migrateConversationKey(only, phone);
+      return { ...only, phone_number: phone };
+    }
+    const progress = (state: string) => this.CONVERSATION_STATE_PROGRESS[state] ?? -1;
+    const rank = (r: any) =>
+      `${String(progress(r.current_state)).padStart(3, '0')}|${r.last_active_at || ''}|${r.updated_at || ''}|${r.created_at || ''}`;
+    const sorted = [...rows].sort((a, b) => (rank(a) < rank(b) ? 1 : rank(a) > rank(b) ? -1 : 0));
+    const winner = sorted[0];
+    this.migrateConversationKey(winner, phone, sorted.slice(1));
+    return { ...winner, phone_number: phone };
+  }
+
+  /**
+   * Secures the winning row under the canonical phone key. Every losing
+   * row is archived with its complete original state and payload BEFORE
+   * deletion, in the same transaction — no user input is ever silently
+   * discarded. Colliding rows are deleted first so the winner can take
+   * the canonical key without violating UNIQUE(phone_number).
+   */
+  private static migrateConversationKey(winner: any, canonicalPhone: string, losers: any[] = []) {
+    const db = getDb();
+    const migrate = db.transaction(() => {
+      for (const loser of losers) {
+        if (loser.id !== winner.id) {
+          db.prepare(
+            `
+            INSERT INTO whatsapp_conversation_archives
+              (id, archived_conversation_id, phone_number, current_state, state_payload, reason, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+            `,
+          ).run(
+            `wca-${crypto.randomUUID()}`,
+            loser.id,
+            loser.phone_number,
+            loser.current_state,
+            loser.state_payload || '{}',
+            `collision: kept state ${winner.current_state} over ${loser.current_state}`,
+          );
+          db.prepare('DELETE FROM whatsapp_conversations WHERE id = ?').run(loser.id);
+        }
+      }
+      if (winner.phone_number !== canonicalPhone) {
+        db.prepare('UPDATE whatsapp_conversations SET phone_number = ?, updated_at = ? WHERE id = ?')
+          .run(canonicalPhone, new Date().toISOString(), winner.id);
+      }
+    });
+    migrate();
+  }
+
   static updateConversation(phone: string, state: WhatsAppState, payload: Record<string, any>) {
+    // Resolve through the candidate lookup so updates land on the migrated
+    // canonical record even when the caller still holds a legacy form.
+    const row = this.findConversationRow(phone);
+    const key = row ? row.phone_number : phone;
     const db = getDb();
     const now = new Date().toISOString();
     db.prepare(`
       UPDATE whatsapp_conversations
       SET current_state = ?, state_payload = ?, last_active_at = ?, updated_at = ?
       WHERE phone_number = ?
-    `).run(state, JSON.stringify(payload), now, now, phone);
+    `).run(state, JSON.stringify(payload), now, now, key);
   }
 
   static resetConversation(phone: string) {
@@ -47,21 +186,50 @@ export class ConversationHandler {
   /**
    * Validates Meta Webhook HMAC-SHA256 signature using raw body buffer and app secret
    */
-  static validateSignature(rawBody: Buffer | string, signatureHeader?: string): boolean {
-    if (!config.meta.appSecret) {
-      // In simulator or local testing without secret, allow through
-      return true;
-    }
-    if (!signatureHeader) return false;
+  static validateSignature(rawBody: Buffer | string | undefined, signatureHeader?: string | string[]): boolean {
+    const appSecret = config.meta.appSecret?.trim() ?? '';
+    if (!appSecret || rawBody === undefined || typeof signatureHeader !== 'string') return false;
 
-    const signature = signatureHeader.replace(/^sha256=/, '');
-    const hmac = crypto.createHmac('sha256', config.meta.appSecret);
-    const calculated = hmac.update(rawBody).digest('hex');
-    return crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(calculated, 'hex'));
+    const signatureMatch = /^sha256=([a-f0-9]{64})$/i.exec(signatureHeader.trim());
+    if (!signatureMatch) return false;
+
+    const received = Buffer.from(signatureMatch[1], 'hex');
+    const calculated = crypto.createHmac('sha256', appSecret).update(rawBody).digest();
+    return received.length === calculated.length && crypto.timingSafeEqual(received, calculated);
   }
 
+  static readonly MENU_ROWS = [
+    { id: 'menu_book', title: 'Book accommodation', description: 'Start registration (BOOK)' },
+    { id: 'menu_status', title: 'Booking status', description: 'View booking (STATUS)' },
+    { id: 'menu_qr', title: 'Show QR pass', description: 'Re-deliver QR (QR)' },
+    { id: 'menu_payment', title: 'Payment instructions', description: 'DEMO only (PAYMENT)' },
+    { id: 'menu_help', title: 'Help', description: 'Commands (HELP)' },
+  ];
+
   /**
-   * Sends the Main Interactive Menu
+   * Exact affirmative replies that grant random-matching consent. Deliberately
+   * exact: substring matching previously granted consent on refusals such as
+   * "I DO NOT CONSENT" or "NO CONSENT".
+   */
+  private static readonly RANDOM_CONSENT_YES = new Set(['YES', 'Y', 'I CONSENT', 'CONSENT YES']);
+
+  /**
+   * Exact replies that refuse random-matching consent. These must never
+   * grant consent. Anything else reprompts.
+   */
+  private static readonly RANDOM_CONSENT_NO = new Set([
+    'NO', 'N', 'NO CONSENT', 'I DO NOT CONSENT', "I DON'T CONSENT", 'DO NOT CONSENT', 'CANCEL', 'NOPE',
+  ]);
+
+  /**
+   * Exact roommate-choice tokens. Substring matching previously read
+   * "UNKNOWN" as KNOWN and "RANDOMIZED" as RANDOM.
+   */
+  private static readonly ROOMMATE_KNOWN_TOKENS = new Set(['KNOWN', 'KNOWN ROOMMATES', 'KNOWN ROOMMATE']);
+  private static readonly ROOMMATE_RANDOM_TOKENS = new Set(['RANDOM', 'RANDOM MATCHING']);
+
+  /**
+   * Sends the Main Interactive Menu (buttons for compatibility)
    */
   static async sendMainMenu(phone: string, customGreeting?: string) {
     const provider = WhatsAppService.getProvider();
@@ -81,6 +249,65 @@ export class ConversationHandler {
     ];
 
     await provider.sendQuickReplyButtons(phone, bodyText, buttons);
+  }
+
+  static async sendResidentMenu(phone: string, intro?: string) {
+    const provider: any = WhatsAppService.getProvider();
+    const body = intro || 'HostelOS resident menu — tap a row or type BOOK, STATUS, QR, PAYMENT, HELP.';
+    if (typeof provider.sendListMenu === 'function') {
+      await provider.sendListMenu(phone, body, 'Open menu', [{ title: 'Resident actions', rows: this.MENU_ROWS }]);
+      return;
+    }
+    await provider.sendQuickReplyButtons(phone, body, [
+      { id: 'menu_status', title: 'Booking status' },
+      { id: 'menu_qr', title: 'Show QR pass' },
+      { id: 'menu_payment', title: 'Payment info' },
+    ]);
+  }
+
+  static buildBookingSummaryText(student: any): string {
+    const group = student.current_group;
+    const alloc = student.current_allocation;
+    const payment = student.payment;
+    let text = `📋 *YOUR ACCOMMODATION BOOKING SUMMARY*\n\n` +
+      `*Hostel Facility:* ${student.gender === 'MALE' ? 'Alpha Male Hall' : 'Beta Female Hall'}\n` +
+      `*Department:* ${student.department} (${student.academic_level})\n` +
+      `*Occupancy Preference:* ${student.preferred_occupancy}-Person Room\n\n`;
+    if (group) {
+      const isSingle = student.preferred_occupancy === 1 || group.target_capacity === 1;
+      if (!isSingle) {
+        text += `👥 *Booking Group:* ${group.group_code}\n` +
+          `*Group Status:* ${String(group.status).replace(/_/g, ' ')}\n` +
+          `*Members:* ${group.member_count || 1}/${group.target_capacity}\n`;
+        if (group.status === 'FORMING') {
+          text += `👉 *Share Code:* Share code *${group.group_code}* with your roommates so they can join this group.\n`;
+        }
+      } else {
+        text += `*Booking Status:* ${String(group.status).replace(/_/g, ' ')}\n`;
+      }
+      if (group.provisional_room) {
+        text += `\n🛏️ *Temporary Room Hold (not final allocation):* Room ${group.provisional_room.room_number}, ` +
+          `${group.provisional_room.capacity}-person capacity, $${group.provisional_room.price_per_student} per student.\n` +
+          `_All group payments must be verified before the manager can finalize this room._\n`;
+      }
+    }
+    if (payment) {
+      text += `\n💳 *Payment Status:* ${payment.status}\n` +
+        `*Amount:* $${payment.amount} (Ref: ${payment.reference_code})\n`;
+      if (payment.status === 'PENDING') {
+        text += `_Your payment has been logged and is awaiting manager verification. DEMO ONLY — no real money._\n`;
+      }
+    }
+    if (alloc && alloc.status === 'FINALIZED') {
+      text += `\n🚪 *Allocated Room:* ${alloc.room_number}\n` +
+        `*Duration:* ${alloc.accommodation_start_date} to ${alloc.accommodation_end_date}\n` +
+        `✅ Your digital pass is active! Type *QR* to view it.\n`;
+    }
+    return text;
+  }
+
+  static canShowPaymentInstructions(student: any): boolean {
+    return !!(student?.payment && student.payment.status === 'PENDING' && student?.current_group?.provisional_room);
   }
 
   /**
@@ -118,8 +345,20 @@ export class ConversationHandler {
         '⏳ *Digital Pass Awaiting Manager Issuance*\n\nYour finalized accommodation is recorded, but a manager must explicitly authorize your credential after payment and photograph review. This request never creates a credential automatically.');
       return;
     }
-    await provider.sendTextMessage(phone,
-      '🔐 *Digital Pass Already Issued*\n\nFor security, QR tokens are never stored for re-delivery. Please contact hostel management to request a documented reissue if you no longer have the originally issued pass.');
+    try {
+      await QRService.redeliverActiveCredential(student.id);
+      return;
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      if (msg.includes('before recoverable delivery was enabled')) {
+        await provider.sendTextMessage(phone,
+          '🔐 *Digital Pass Already Issued*\n\nThis pass was issued before secure re-delivery was enabled. Please contact hostel management to request a documented one-time reissue; the next pass will support secure QR re-delivery.');
+        return;
+      }
+      await provider.sendTextMessage(phone,
+        `⚠️ QR re-delivery is temporarily unavailable (${msg.slice(0, 160)}). Your credential remains valid. Please try again later or contact management.`);
+      return;
+    }
   }
 
   /**
@@ -138,47 +377,9 @@ export class ConversationHandler {
       return;
     }
 
-    const group = student.current_group;
-    const alloc = student.current_allocation;
-    const payment = student.payment;
-
-    let text = `📋 *YOUR ACCOMMODATION BOOKING SUMMARY*\n\n` +
-      `*Name:* ${student.full_name}\n` +
-      `*Hostel Facility:* ${student.gender === 'MALE' ? 'Alpha Male Hall' : 'Beta Female Hall'}\n` +
-      `*Department:* ${student.department} (${student.academic_level})\n` +
-      `*Occupancy Preference:* ${student.preferred_occupancy}-Person Room\n\n`;
-
-    if (group) {
-      text += `👥 *Booking Group:* ${group.group_code}\n` +
-        `*Group Status:* ${group.status.replace(/_/g, ' ')}\n` +
-        `*Members:* ${group.member_count || 1}/${group.target_capacity}\n`;
-
-      if (group.status === 'FORMING') {
-        text += `👉 *Share Code:* Share code *${group.group_code}* with your roommates so they can join this group.\n`;
-      }
-      if (group.provisional_room) {
-        text += `\n🛏️ *Temporary Room Hold (not final allocation):* Room ${group.provisional_room.room_number}, ` +
-          `${group.provisional_room.capacity}-person capacity, $${group.provisional_room.price_per_student} per student.\n` +
-          `_All group payments must be verified before the manager can finalize this room._\n`;
-      }
-    }
-
-    if (payment) {
-      text += `\n💳 *Payment Status:* ${payment.status}\n` +
-        `*Amount:* $${payment.amount} (Ref: ${payment.reference_code})\n`;
-      if (payment.status === 'PENDING') {
-        text += `_Your payment has been logged and is awaiting manager verification._\n`;
-      }
-    }
-
-    if (alloc && alloc.status === 'FINALIZED') {
-      text += `\n🚪 *Allocated Room:* ${alloc.room_number}\n` +
-        `*Duration:* ${alloc.accommodation_start_date} to ${alloc.accommodation_end_date}\n` +
-        `✅ Your digital pass is active! Type *QR* to view it.\n`;
-    }
-
+    const text = this.buildBookingSummaryText(student);
     await provider.sendTextMessage(phone, text);
-    if (payment?.status === 'PENDING' && group?.provisional_room) {
+    if (this.canShowPaymentInstructions(student)) {
       await provider.sendQuickReplyButtons(phone, 'View your individual DEMO payment instructions. No real money is involved.', [{ id: 'btn_payment_instructions', title: 'Payment instructions' }]);
     }
   }
@@ -199,21 +400,53 @@ export class ConversationHandler {
     from: string;
     textBody?: string;
     buttonId?: string;
+    image?: { id: string; mime_type?: string };
   }) {
     const db = getDb();
-    const phone = incoming.from.trim();
-    const rawText = (incoming.textBody || '').trim();
+    if (typeof incoming.from !== 'string' || typeof incoming.messageId !== 'string') {
+      console.warn('[WhatsApp] Dropping message with missing sender or id.');
+      return;
+    }
+    const rawPhone = incoming.from.trim();
+    const canonicalPhone = normalizePhoneNumber(rawPhone);
+    if (!isValidCanonicalPhone(canonicalPhone)) {
+      console.warn('[WhatsApp] Dropping message with invalid sender phone.');
+      return;
+    }
+    const phone = canonicalPhone;
+    const rawText = (typeof incoming.textBody === 'string' ? incoming.textBody : '').trim();
     const upperText = rawText.toUpperCase();
-    const buttonId = incoming.buttonId;
+    const buttonId = typeof incoming.buttonId === 'string' ? incoming.buttonId : undefined;
 
-    // 1. Idempotency Check
+    // 1. Idempotency check. The processed marker is written only AFTER
+    // successful handling (see recordInboundProcessed), so a failure leaves
+    // the message retryable instead of permanently suppressed.
     const existing = db.prepare('SELECT id FROM whatsapp_processed_messages WHERE message_id = ?').get(incoming.messageId);
     if (existing) {
       console.log(`[WhatsApp] Skipping already processed message ${incoming.messageId}`);
       return;
     }
 
-    // Record incoming message for idempotency
+    try {
+      await this.handleIncomingCore(incoming);
+    } catch (err) {
+      // No processed marker on failure: the durable inbox worker may retry.
+      console.warn(`[WhatsApp] Handling failed for ${incoming.messageId}; leaving it retryable.`);
+      throw err;
+    }
+
+    this.recordInboundProcessed(incoming, phone);
+  }
+
+  /**
+   * Writes the at-most-once processed marker only after the message was
+   * fully handled. Concurrent duplicates race safely on the UNIQUE key.
+   */
+  private static recordInboundProcessed(
+    incoming: { messageId: string; from: string; textBody?: string; buttonId?: string; image?: { id: string; mime_type?: string } },
+    phone: string,
+  ) {
+    const db = getDb();
     try {
       db.prepare(`
         INSERT INTO whatsapp_processed_messages (id, message_id, phone_number, message_type, direction, payload, processed_at)
@@ -222,16 +455,44 @@ export class ConversationHandler {
         `wpm-${crypto.randomUUID()}`,
         incoming.messageId,
         phone,
-        buttonId ? 'interactive' : 'text',
-        JSON.stringify(incoming)
+        incoming.image ? 'image' : incoming.buttonId ? 'interactive' : 'text',
+        JSON.stringify({ messageId: incoming.messageId, from: phone, hasImage: !!incoming.image })
       );
-    } catch (e) {
-      // Duplicate message caught by unique constraint
+    } catch {
+      // Duplicate marker from a concurrent delivery; already handled.
+    }
+  }
+
+  /**
+   * Core state-machine handling for one validated inbound message. Throws
+   * on failure so callers (webhook inbox worker, simulator) can retry.
+   */
+  private static async handleIncomingCore(incoming: {
+    messageId: string;
+    from: string;
+    textBody?: string;
+    buttonId?: string;
+    image?: { id: string; mime_type?: string };
+  }) {
+    const db = getDb();
+    const rawPhone = incoming.from.trim();
+    const canonicalPhone = normalizePhoneNumber(rawPhone);
+    if (!isValidCanonicalPhone(canonicalPhone)) {
+      console.warn('[WhatsApp] Dropping message with invalid sender phone.');
       return;
     }
+    const phone = canonicalPhone;
+    const rawText = (typeof incoming.textBody === 'string' ? incoming.textBody : '').trim();
+    const upperText = rawText.toUpperCase();
+    const buttonId = typeof incoming.buttonId === 'string' ? incoming.buttonId : undefined;
 
     const provider = WhatsAppService.getProvider();
     const { state, payload } = this.getConversation(phone);
+
+    if (incoming.image) {
+      await this.handleWhatsAppImage(phone, incoming.messageId, incoming.image);
+      return;
+    }
 
     // Global reset / menu commands
     if (buttonId === 'btn_show_qr' || upperText === 'QR' || upperText === 'PASS') {
@@ -257,9 +518,40 @@ export class ConversationHandler {
       return;
     }
 
-    if (upperText === 'HELP' || upperText === 'MENU' || upperText === 'HI' || upperText === 'HELLO') {
+    if (buttonId === 'menu_book' || (upperText === 'BOOK' && buttonId?.startsWith('menu_'))) {
+      if (buttonId === 'menu_book') {
+        const existing = StudentService.getStudentByPhone(phone);
+        if (existing) { await this.handleViewBooking(phone); return; }
+        this.updateConversation(phone, 'AWAITING_NAME', {});
+        await provider.sendTextMessage(phone, `📝 *Hostel Registration — Step 1/6*\n\nPlease enter your *Full Name* (as registered in your university records):`);
+        return;
+      }
+    }
+    if (buttonId === 'menu_status') { await this.handleViewBooking(phone); return; }
+    if (buttonId === 'menu_qr') { await this.handleShowQR(phone); return; }
+    if (buttonId === 'menu_payment') { await this.handlePaymentInstructions(phone); return; }
+    // Display permission is granted only by uploading a photograph after the
+    // pre-upload disclosure (recorded automatically on submit). There is no
+    // separate grant command. Residents may still withdraw display permission
+    // at any time; withdrawal only ever withholds the photograph.
+    if (upperText === 'CONSENT PHOTO NO' || upperText === 'CONSENT NO') { await this.handlePhotoConsent(phone, false); return; }
+    // 'CONSENT YES' is also a valid random-matching consent token, so it must
+    // still reach the state machine while registration is awaiting that
+    // decision; otherwise the photo-permission notice would swallow it.
+    if (upperText === 'CONSENT PHOTO YES' || (upperText === 'CONSENT YES' && state !== 'AWAITING_RANDOM_CONSENT')) {
+      await provider.sendTextMessage(phone, 'No separate consent step is needed: uploading your photograph automatically grants permission for it to appear on authorized QR scans once a manager approves it. To send a photograph, attach it directly to this chat.');
+      return;
+    }
+    if (buttonId === 'menu_help') { this.resetConversation(phone); await this.sendResidentMenu(phone); return; }
+
+    if (upperText === 'MENU') {
+      await this.sendResidentMenu(phone);
+      return;
+    }
+    if (upperText === 'HELP' || upperText === 'HI' || upperText === 'HELLO') {
       this.resetConversation(phone);
       await this.sendMainMenu(phone);
+      await this.sendResidentMenu(phone, 'More actions are available in the list below.');
       return;
     }
 
@@ -285,16 +577,18 @@ export class ConversationHandler {
     // State machine steps
     switch (state) {
       case 'AWAITING_NAME': {
-        if (rawText.length < 2) {
-          await provider.sendTextMessage(phone, 'Please enter a valid full name (minimum 2 characters):');
+        const nameCheck = FullNameSchema.safeParse(rawText);
+        if (!nameCheck.success) {
+          const detail = nameCheck.error.issues[0]?.message || 'Please enter a valid full name (minimum 2 characters):';
+          await provider.sendTextMessage(phone, `${detail} Reply with your full name as registered in your university records:`);
           return;
         }
-        payload.full_name = rawText;
+        payload.full_name = nameCheck.data;
         this.updateConversation(phone, 'AWAITING_GENDER', payload);
 
         await provider.sendQuickReplyButtons(
           phone,
-          `📝 *Hostel Registration — Step 2/6*\n\nHello ${rawText}! Please select your *Gender* to assign your appropriate hostel facility:`,
+          `📝 *Hostel Registration — Step 2/6*\n\nHello ${payload.full_name}! Please select your *Gender* to assign your appropriate hostel facility:`,
           [
             { id: 'gender_male', title: 'Male Hostel' },
             { id: 'gender_female', title: 'Female Hostel' }
@@ -326,11 +620,13 @@ export class ConversationHandler {
       }
 
       case 'AWAITING_DEPT': {
-        if (rawText.length < 2) {
-          await provider.sendTextMessage(phone, 'Please enter your department:');
+        const deptCheck = DepartmentSchema.safeParse(rawText);
+        if (!deptCheck.success) {
+          const detail = deptCheck.error.issues[0]?.message || 'Please enter your department:';
+          await provider.sendTextMessage(phone, `${detail} Reply with your academic department:`);
           return;
         }
-        payload.department = rawText;
+        payload.department = deptCheck.data;
         this.updateConversation(phone, 'AWAITING_LEVEL', payload);
         await provider.sendTextMessage(
           phone,
@@ -340,11 +636,13 @@ export class ConversationHandler {
       }
 
       case 'AWAITING_LEVEL': {
-        if (rawText.length < 1) {
-          await provider.sendTextMessage(phone, 'Please enter your academic level:');
+        const levelCheck = AcademicLevelSchema.safeParse(rawText);
+        if (!levelCheck.success) {
+          const detail = levelCheck.error.issues[0]?.message || 'Please enter your academic level:';
+          await provider.sendTextMessage(phone, `${detail} Reply with your academic level:`);
           return;
         }
-        payload.academic_level = rawText;
+        payload.academic_level = levelCheck.data;
         this.updateConversation(phone, 'AWAITING_OCCUPANCY', payload);
 
         await provider.sendQuickReplyButtons(
@@ -397,7 +695,7 @@ export class ConversationHandler {
       }
 
       case 'AWAITING_ROOMMATE_CHOICE': {
-        if (buttonId === 'mode_known' || upperText.includes('KNOWN')) {
+        if (buttonId === 'mode_known' || this.ROOMMATE_KNOWN_TOKENS.has(upperText)) {
           payload.roommate_mode = 'KNOWN';
           if (payload.preferred_occupancy === 3) {
             this.updateConversation(phone, 'AWAITING_AUTO_COMPLETE_CONSENT', payload);
@@ -416,7 +714,7 @@ export class ConversationHandler {
           return;
         }
 
-        if (buttonId === 'mode_random' || upperText.includes('RANDOM')) {
+        if (buttonId === 'mode_random' || this.ROOMMATE_RANDOM_TOKENS.has(upperText)) {
           payload.roommate_mode = 'RANDOM';
           this.updateConversation(phone, 'AWAITING_RANDOM_CONSENT', payload);
           await provider.sendQuickReplyButtons(
@@ -456,25 +754,26 @@ export class ConversationHandler {
           return;
         }
 
-        if (upperText.startsWith('GRP-') || rawText.length >= 4) {
-          // Joining with code
-          payload.group_invite_code = upperText;
+        const codeCheck = GroupInviteCodeSchema.safeParse(rawText);
+        if (codeCheck.success) {
+          // Joining with code (stored uppercased by the shared schema)
+          payload.group_invite_code = codeCheck.data;
           await this.completeRegistration(phone, payload);
           return;
         }
 
-        await provider.sendTextMessage(phone, 'Please reply with the invitation code (e.g. *GRP-ABCD*) or reply *NEW* to create your own group.');
+        await provider.sendTextMessage(phone, 'That invitation code was not recognized. Codes look like *GRP-XXXX* (4 characters, no I/O/0/1). Reply with the code or reply *NEW* to create your own group.');
         return;
       }
 
       case 'AWAITING_RANDOM_CONSENT': {
-        if (buttonId === 'consent_yes' || upperText === 'YES' || upperText === 'Y' || upperText.includes('CONSENT')) {
+        if (buttonId === 'consent_yes' || this.RANDOM_CONSENT_YES.has(upperText)) {
           payload.consent_random_matching = true;
           await this.completeRegistration(phone, payload);
           return;
         }
 
-        if (buttonId === 'consent_no' || upperText === 'NO' || upperText === 'N') {
+        if (buttonId === 'consent_no' || this.RANDOM_CONSENT_NO.has(upperText)) {
           this.resetConversation(phone);
           await provider.sendTextMessage(
             phone,
@@ -498,9 +797,113 @@ export class ConversationHandler {
   /**
    * Completes registration and informs the student of their booking status
    */
+  private static digitsOnly(value: string): string {
+    return (value || '').replace(/[^0-9]/g, '');
+  }
+
+  private static findStudentByWhatsAppSender(phone: string): { status: 'matched' | 'unknown' | 'ambiguous'; studentId?: string } {
+    const db = getDb();
+    const trimmed = phone.trim();
+    const digits = this.digitsOnly(trimmed);
+    const candidates = new Set<string>(phoneLookupCandidates(phone));
+    const rows = db.prepare('SELECT id, phone_number FROM students').all() as any[];
+    const matches = rows.filter(r => {
+      if (candidates.has((r.phone_number || '').trim())) return true;
+      return digits.length >= 7 && this.digitsOnly(r.phone_number) === digits;
+    });
+    const unique = [...new Map(matches.map(r => [r.id, r])).values()];
+    if (unique.length === 1) return { status: 'matched', studentId: unique[0].id };
+    if (unique.length > 1) return { status: 'ambiguous' };
+    return { status: 'unknown' };
+  }
+
+  /**
+   * Withdrawal-only handler. Permission is granted solely by uploading after
+   * the pre-upload disclosure; this path only records a resident takedown
+   * (WITHDRAWN), which immediately withholds the photograph from scans.
+   */
+  static async handlePhotoConsent(phone: string, granted: boolean) {
+    const provider = WhatsAppService.getProvider();
+    const match = this.findStudentByWhatsAppSender(phone);
+    if (match.status !== 'matched' || !match.studentId) {
+      await provider.sendTextMessage(phone, 'We could not link this WhatsApp number to a student profile, so photo-display consent was not recorded. Please contact management.');
+      return;
+    }
+    if (granted) {
+      await provider.sendTextMessage(phone, 'No separate consent step is needed: uploading your photograph automatically grants permission for it to appear on authorized QR scans once a manager approves it. To send a photograph, attach it directly to this chat.');
+      return;
+    }
+    try {
+      const { PhotoDisplayConsentService } = await import('../photoDisplayConsentService.js');
+      PhotoDisplayConsentService.recordDecision({ studentId: match.studentId, decision: 'WITHDRAWN', decidedBy: 'RESIDENT', notes: 'Resident withdrew QR photo display via WhatsApp.' });
+      await provider.sendTextMessage(phone, 'Noted. Your photograph will NOT be shown on authorized QR scans. Your pass still verifies name, facility, room and dates.');
+    } catch (err: any) {
+      await provider.sendTextMessage(phone, `⚠️ ${err?.message || 'Consent could not be recorded.'}`);
+    }
+  }
+
+  /**
+   * Durable pre-upload disclosure gate. The photo-display disclosure must be
+   * shown before a photograph is accepted: the first image from a sender
+   * without a current-version disclosure record triggers the disclosure plus
+   * a resend request and is never processed or permission-granting. The
+   * record survives conversation resets; rejections re-arm it for the next
+   * replacement round.
+   */
+  static hasPhotoDisclosure(phone: string, studentId: string): boolean {
+    try {
+      const row = getDb().prepare(
+        'SELECT disclosure_version FROM whatsapp_photo_disclosures WHERE phone_number = ?'
+      ).get(phone) as any;
+      return !!row && row.disclosure_version === PHOTO_UPLOAD_DISCLOSURE_VERSION && !!studentId;
+    } catch {
+      return false;
+    }
+  }
+
+  static recordPhotoDisclosure(phone: string, studentId: string): void {
+    const now = new Date().toISOString();
+    getDb().prepare(`INSERT INTO whatsapp_photo_disclosures (phone_number, student_id, disclosure_version, shown_at, created_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(phone_number) DO UPDATE SET student_id = excluded.student_id, disclosure_version = excluded.disclosure_version, shown_at = excluded.shown_at`)
+      .run(phone, studentId, PHOTO_UPLOAD_DISCLOSURE_VERSION, now, now);
+  }
+
+  static async handleWhatsAppImage(phone: string, messageId: string, image: { id: string; mime_type?: string }) {
+    const provider = WhatsAppService.getProvider();
+    const match = this.findStudentByWhatsAppSender(phone);
+    if (match.status === 'unknown') {
+      await provider.sendTextMessage(phone, `We received your photograph, but this WhatsApp number is not linked to a student profile yet.\n\nType *BOOK* to register first, then resend the photograph.`);
+      return;
+    }
+    if (match.status === 'ambiguous' || !match.studentId) {
+      await provider.sendTextMessage(phone, `We received your photograph, but this number matches more than one profile. Please contact hostel management so we link the correct student before resending.`);
+      return;
+    }
+    const { PHOTO_UPLOAD_DISCLOSURE_VERSION, PHOTO_WHATSAPP_DISCLOSURE_TEXT } = await import('../photoDisplayConsentService.js');
+    if (!this.hasPhotoDisclosure(phone, match.studentId)) {
+      this.recordPhotoDisclosure(phone, match.studentId);
+      await provider.sendTextMessage(phone, `${PHOTO_WHATSAPP_DISCLOSURE_TEXT}\n\nYour photograph was not saved yet. Please resend it now to confirm, and it will be reviewed by hostel management.`);
+      return;
+    }
+    try {
+      const { WhatsAppMediaService } = await import('./whatsappMediaService.js');
+      const { StudentPhotoService } = await import('../studentPhotoService.js');
+      const media = await WhatsAppMediaService.getMediaDownload({ id: image.id });
+      const submitted = await StudentPhotoService.submitWhatsAppPhoto(match.studentId, media.bytes, { messageId, phoneNumber: phone }, { disclosureVersion: PHOTO_UPLOAD_DISCLOSURE_VERSION });
+      await provider.sendTextMessage(phone, submitted.isReplacement
+        ? `✅ Replacement photograph received and *PENDING REVIEW*. Your current approved photograph stays active on authorized QR scans until a manager approves the replacement. You will be notified after review.`
+        : `✅ Photograph received. By sending it after the disclosure you agreed it will be reviewed by hostel management and, once approved, shown with your name, facility and room when authorized staff verify your QR pass. It is now *PENDING REVIEW*. You will be notified after approval. Type *STATUS* to check your booking.`);
+    } catch (err: any) {
+      await provider.sendTextMessage(phone, `⚠️ ${err.message || 'Unable to process the photograph. Please resend a clear JPEG, PNG, or WebP image (5 MB or smaller).'}`);
+    }
+  }
+
   private static async completeRegistration(phone: string, payload: any) {
     const provider = WhatsAppService.getProvider();
     try {
+      // Strict booleans: only an actual `true` grants consent. Strings such
+      // as "false" must never become truthy through `!!value`.
       const regInput = {
         full_name: payload.full_name,
         phone_number: phone,
@@ -509,25 +912,39 @@ export class ConversationHandler {
         academic_level: payload.academic_level,
         preferred_occupancy: payload.preferred_occupancy,
         roommate_mode: payload.roommate_mode,
-        consent_random_matching: !!payload.consent_random_matching,
-        auto_complete_triple_consent: !!payload.auto_complete_triple_consent,
+        consent_random_matching: payload.consent_random_matching === true,
+        auto_complete_triple_consent: payload.auto_complete_triple_consent === true,
         group_invite_code: payload.group_invite_code
       };
 
-      const result = StudentService.registerStudent(regInput);
+      const checked = StudentRegistrationSchema.safeParse(regInput);
+      if (!checked.success) {
+        const detail = checked.error.issues[0]?.message || 'Registration details need correction.';
+        console.warn('[WhatsApp] Registration validation failed:', checked.error.issues);
+        this.resetConversation(phone);
+        await provider.sendTextMessage(
+          phone,
+          `We could not complete registration: ${detail}\n\nPlease type *BOOK* to start again and check each answer.`
+        );
+        return;
+      }
+
+      const result = StudentService.registerStudent(checked.data);
       this.resetConversation(phone);
 
+      const isSingle = result.student.preferred_occupancy === 1;
       let successMsg = `🎉 *CONGRATULATIONS, ${result.student.full_name}! REGISTRATION COMPLETE*\n\n` +
         `*Facility:* ${result.student.gender === 'MALE' ? 'Alpha Male Hall' : 'Beta Female Hall'}\n` +
         `*Occupancy:* ${result.student.preferred_occupancy}-Person Room\n`;
 
-      if (result.group) {
+      if (result.group && !isSingle) {
         successMsg += `*Booking Group Code:* *${result.group.group_code}*\n` +
           `*Status:* ${result.group.status.replace(/_/g, ' ')}\n\n`;
-
         if (result.group.status === 'FORMING') {
           successMsg += `📢 *Next Step:* Share code *${result.group.group_code}* with your roommate(s). Once all members join, your group becomes eligible for room allocation.\n\n`;
         }
+      } else if (result.group) {
+        successMsg += `*Booking Status:* ${result.group.status.replace(/_/g, ' ')}\n\n`;
       }
 
       if (result.queueItem) {
@@ -538,13 +955,23 @@ export class ConversationHandler {
         `Type *STATUS* anytime to check your allocation progress, or *QR* once approved!`;
 
       await provider.sendTextMessage(phone, successMsg);
+      try {
+        const fresh = StudentService.getStudentByPhone(phone);
+        if (fresh) {
+          await provider.sendTextMessage(phone, this.buildBookingSummaryText(fresh));
+          if (this.canShowPaymentInstructions(fresh)) {
+            await provider.sendQuickReplyButtons(phone, 'Tap below for your DEMO payment instructions. Requesting instructions never moves money.', [{ id: 'btn_payment_instructions', title: 'PAYMENT INSTRUCTIONS' }]);
+          }
+        }
+      } catch { /* summary is best-effort */ }
       await this.sendMainMenu(phone, 'How else can we help you today?');
+      await this.sendResidentMenu(phone, 'Prefer a list? Use the menu below or type MENU anytime.');
     } catch (err: any) {
       console.error('Error completing student registration:', err);
       this.resetConversation(phone);
       await provider.sendTextMessage(
         phone,
-        `❌ Registration error: ${err.message}\n\nPlease type *BOOK* to try again.`
+        `❌ We could not complete registration: ${err?.issues?.[0]?.message || err?.message || 'Registration could not be completed.'}\n\nPlease type *BOOK* to try again.`
       );
     }
   }

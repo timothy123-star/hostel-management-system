@@ -12,6 +12,9 @@ let dbInstance: Database.Database | null = null;
 export function getDb(customPath?: string): Database.Database {
   if (!dbInstance || customPath) {
     const resolvedPath = customPath || path.resolve(config.dbPath);
+    // Railway persistent volume (e.g. /data/hostel.sqlite) may not exist on
+    // first boot. Creating only the parent directory never touches the DB.
+    fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
     const db = new Database(resolvedPath);
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
@@ -53,6 +56,87 @@ export function initSchema(db: Database.Database) {
   if (!studentColumns.some(column => column.name === 'photo_status')) {
     db.exec("ALTER TABLE students ADD COLUMN photo_status TEXT NOT NULL DEFAULT 'NOT_SUBMITTED'");
   }
+
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS whatsapp_notifications (
+  id TEXT PRIMARY KEY,
+  dedupe_key TEXT NOT NULL UNIQUE,
+  student_id TEXT REFERENCES students(id) ON DELETE SET NULL,
+  phone_number TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('PAYMENT_APPROVED','PAYMENT_REJECTED','PHOTO_APPROVED','PHOTO_REJECTED','QR_ISSUED')),
+  body_text TEXT NOT NULL,
+  template_name TEXT,
+  template_params TEXT,
+  status TEXT NOT NULL DEFAULT 'QUEUED' CHECK (status IN ('QUEUED','SENT','FAILED','PENDING_TEMPLATE')),
+  meta_message_id TEXT,
+  error TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  sent_at TEXT
+)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_wa_notifications_status ON whatsapp_notifications(status, created_at)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_wa_notifications_student ON whatsapp_notifications(student_id, created_at)`);
+    const waColumns = db.prepare("PRAGMA table_info(whatsapp_notifications)").all() as any[];
+    if (!waColumns.some((column) => column.name === 'template_params')) {
+      db.exec('ALTER TABLE whatsapp_notifications ADD COLUMN template_params TEXT');
+    }
+  } catch { /* table already exists */ }
+  try {
+    const qrCols = db.prepare("PRAGMA table_info(resident_qr_credentials)").all() as any[];
+    if (!qrCols.some((c: any) => c.name === 'token_ciphertext')) {
+      db.exec('ALTER TABLE resident_qr_credentials ADD COLUMN token_ciphertext TEXT');
+    }
+  } catch { /* ignore */ }
+
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS photo_display_consents (
+  id TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  purpose TEXT NOT NULL DEFAULT 'QR_VERIFICATION_DISPLAY' CHECK (purpose = 'QR_VERIFICATION_DISPLAY'),
+  decision TEXT NOT NULL CHECK (decision IN ('GRANTED','DECLINED','WITHDRAWN')),
+  decided_by TEXT NOT NULL CHECK (decided_by IN ('RESIDENT','MANAGER')),
+  decided_by_admin_id TEXT REFERENCES admin_users(id) ON DELETE SET NULL,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_photo_display_consents_student ON photo_display_consents(student_id, created_at)`);
+  } catch { /* table already exists */ }
+
+  // Durable WhatsApp inbound inbox for existing development databases.
+  // Additive only: no existing table or row is modified.
+  db.exec(`CREATE TABLE IF NOT EXISTS whatsapp_inbound_inbox (
+  id TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL UNIQUE,
+  from_number TEXT NOT NULL,
+  text_body TEXT,
+  button_id TEXT,
+  has_image INTEGER NOT NULL DEFAULT 0,
+  image_id TEXT,
+  image_mime TEXT,
+  message_type TEXT NOT NULL DEFAULT 'text',
+  status TEXT NOT NULL DEFAULT 'RECEIVED' CHECK (status IN ('RECEIVED', 'PROCESSING', 'PROCESSED', 'RETRYABLE', 'FAILED')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_wa_inbox_status ON whatsapp_inbound_inbox(status, next_attempt_at, created_at)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_wa_inbox_message ON whatsapp_inbound_inbox(message_id)`);
+
+  // Durable archive for losing WhatsApp conversation rows. Additive only:
+  // no existing table or row is modified.
+  db.exec(`CREATE TABLE IF NOT EXISTS whatsapp_conversation_archives (
+  id TEXT PRIMARY KEY,
+  archived_conversation_id TEXT NOT NULL,
+  phone_number TEXT NOT NULL,
+  current_state TEXT NOT NULL,
+  state_payload TEXT NOT NULL DEFAULT '{}',
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_wa_conv_archives_phone ON whatsapp_conversation_archives(phone_number, created_at)`);
 
   const accessLogColumns = db.prepare("PRAGMA table_info(access_logs)").all() as any[];
   if (!accessLogColumns.some(column => column.name === 'resident_qr_credential_id')) {

@@ -186,7 +186,7 @@ export const StudentsPage: React.FC = () => {
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-3">
                       <img
-                        src={s.photo_url || `https://api.dicebear.com/7.x/initials/svg?seed=${s.full_name}`}
+                        src={s.photo_url || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(s.full_name)}`}
                         alt={s.full_name}
                         className="w-8 h-8 rounded-full bg-slate-100 object-cover"
                       />
@@ -263,7 +263,7 @@ export const StudentsPage: React.FC = () => {
             {/* Header info card */}
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex items-start gap-4">
               <img
-                src={selectedStudent.photo_url || `https://api.dicebear.com/7.x/initials/svg?seed=${selectedStudent.full_name}`}
+                src={selectedStudent.photo_url || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(selectedStudent.full_name)}`}
                 alt={selectedStudent.full_name}
                 className="w-16 h-16 rounded-2xl bg-white border border-slate-200 object-cover shadow-sm"
               />

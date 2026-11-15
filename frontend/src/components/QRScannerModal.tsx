@@ -21,7 +21,23 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationResult, setVerificationResult] = useState<any | null>(null);
   const [scannerError, setScannerError] = useState<string | null>(null);
+  const [photoSrc, setPhotoSrc] = useState<string | null>(null);
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+
+  // The approved photograph is served by an authenticated staff-only
+  // endpoint, so it is fetched with the staff Bearer token (never rendered
+  // as an unauthenticated <img> URL). Revoked on result change/unmount.
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setPhotoSrc(null);
+    const remoteUrl: string | undefined = verificationResult?.student?.photo_url;
+    if (!remoteUrl) return;
+    api.fetchStaffPhoto(remoteUrl)
+      .then((url) => { if (!cancelled) { objectUrl = url; setPhotoSrc(url); } else { URL.revokeObjectURL(url); } })
+      .catch(() => { if (!cancelled) setPhotoSrc(null); });
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [verificationResult]);
 
   useEffect(() => {
     if (isOpen && activeTab === 'camera') {
@@ -81,6 +97,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
 
   const handleReset = () => {
     setVerificationResult(null);
+    setPhotoSrc(null);
     setManualToken('');
     setScannerError(null);
     if (activeTab === 'camera') {
@@ -128,13 +145,20 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
             </div>
 
             {verificationResult.student && (
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex gap-4">
-                <img
-                  src={verificationResult.student.photo_url || `https://api.dicebear.com/7.x/initials/svg?seed=${verificationResult.student.full_name}`}
-                  alt="Student"
-                  className="w-20 h-20 rounded-xl bg-white border border-slate-200 object-cover shadow-sm"
-                />
-                <div className="flex-1 text-sm space-y-1">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <div className="flex flex-col items-center text-center">
+                  <img
+                    src={photoSrc || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(verificationResult.student.full_name)}`}
+                    alt={photoSrc ? `Approved photograph of ${verificationResult.student.full_name} for identity comparison` : `Identity placeholder for ${verificationResult.student.full_name}`}
+                    className="w-44 h-44 rounded-2xl bg-white border-2 border-emerald-500 object-cover shadow-sm"
+                  />
+                  <p className="mt-2 text-xs font-medium text-emerald-800">
+                    {photoSrc
+                      ? 'Approved photograph — compare with the person present.'
+                      : 'No approved photograph on file — verify name, facility, room and dates with management.'}
+                  </p>
+                </div>
+                <div className="mt-3 flex-1 text-sm space-y-1">
                   <p className="font-semibold text-base text-slate-900">
                     {verificationResult.student.full_name}
                   </p>

@@ -22,6 +22,7 @@ export const WhatsAppSimulatorPage: React.FC = () => {
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [inboxFailures, setInboxFailures] = useState<{ failed_count: number; failures: any[] } | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const demoContacts = [
@@ -42,6 +43,13 @@ export const WhatsAppSimulatorPage: React.FC = () => {
       setMessages(historyRes.history.reverse());
     } catch (err) {
       console.error('Failed to load WhatsApp simulator data:', err);
+    }
+    try {
+      const failuresRes = await api.getInboxFailures(20, 0);
+      setInboxFailures({ failed_count: failuresRes.failed_count, failures: failuresRes.failures });
+    } catch {
+      // Inbox failure view is operational-only; simulator stays usable offline.
+      setInboxFailures(null);
     }
   };
 
@@ -399,6 +407,36 @@ export const WhatsAppSimulatorPage: React.FC = () => {
                 Verify Token: <code className="font-mono text-slate-700">hostel_meta_verify_token_demo_2026</code>
               </p>
             </div>
+          </div>
+
+          {/* Inbox failures (manager operational view) */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-slate-500" />
+                Inbox Delivery Failures
+              </h3>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                (inboxFailures?.failed_count ?? 0) > 0
+                  ? 'bg-red-50 text-red-700 border border-red-200'
+                  : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+              }`}>
+                {inboxFailures === null ? 'Unavailable' : `${inboxFailures.failed_count} terminal`}
+              </span>
+            </div>
+            {inboxFailures !== null && inboxFailures.failures.length === 0 && (
+              <p className="text-xs text-slate-500">No terminally failed inbound messages. Retryable messages recover automatically.</p>
+            )}
+            {inboxFailures !== null && inboxFailures.failures.slice(0, 5).map((f: any) => (
+              <div key={f.message_id} className="p-2.5 rounded-xl bg-red-50/60 border border-red-200/60 text-xs space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-[11px] text-slate-700 truncate">{f.message_id}</span>
+                  <span className="text-slate-500 shrink-0">{f.attempts} attempts</span>
+                </div>
+                <p className="text-red-800 break-words">{String(f.last_error || 'Unknown error').slice(0, 200)}</p>
+                <p className="text-[11px] text-slate-500">{f.from_number} · {f.updated_at}</p>
+              </div>
+            ))}
           </div>
         </div>
       </div>

@@ -1,6 +1,12 @@
 import crypto from 'crypto';
 import { getDb } from '../db/connection.js';
-import { Student, StudentRegistrationInput, HostelCode } from '@hostel/shared';
+import {
+  Student,
+  StudentRegistrationInput,
+  HostelCode,
+  StudentRegistrationSchema,
+  phoneLookupCandidates,
+} from '@hostel/shared';
 import { BookingGroupService } from './bookingGroupService.js';
 import { MatchingService } from './matchingService.js';
 import { AuditService } from './auditService.js';
@@ -14,19 +20,34 @@ export class StudentService {
     group?: any;
     queueItem?: any;
   } {
+    // Single runtime contract for dashboard, WhatsApp and any future caller.
+    // Zod applies normalization (NFC, trim, whitespace collapse, canonical
+    // phone, uppercased invite code) and rejects invalid enums, lengths,
+    // control characters and non-boolean consent values.
+    const parsed = StudentRegistrationSchema.parse(input);
     const db = getDb();
-    const cleanPhone = input.phone_number.trim();
+    const cleanPhone = parsed.phone_number;
 
-    // Check if phone already registered
-    const existing = db.prepare('SELECT * FROM students WHERE phone_number = ?').get(cleanPhone) as any;
+    // Duplicate detection covers both the canonical form used for new writes
+    // and legacy representations already stored in the database.
+    const phoneCandidates = Array.from(
+      new Set([
+        ...phoneLookupCandidates(cleanPhone),
+        ...phoneLookupCandidates(String((input as any)?.phone_number ?? '')),
+      ]),
+    );
+    const placeholders = phoneCandidates.map(() => '?').join(', ');
+    const existing = db
+      .prepare(`SELECT * FROM students WHERE phone_number IN (${placeholders})`)
+      .get(...phoneCandidates) as any;
     if (existing) {
       throw new Error(`A student with phone number ${cleanPhone} is already registered.`);
     }
 
     const studentId = `stu-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
-    const consent = input.consent_random_matching ? 1 : 0;
-    const photoUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(input.full_name)}`;
+    const consent = parsed.consent_random_matching ? 1 : 0;
+    const photoUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(parsed.full_name)}`;
 
     let createdStudent: any = null;
     let group: any = null;
@@ -41,13 +62,13 @@ export class StudentService {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         studentId,
-        input.full_name,
+        parsed.full_name,
         cleanPhone,
-        input.gender,
-        input.department,
-        input.academic_level,
-        input.preferred_occupancy,
-        input.roommate_mode,
+        parsed.gender,
+        parsed.department,
+        parsed.academic_level,
+        parsed.preferred_occupancy,
+        parsed.roommate_mode,
         consent,
         photoUrl,
         now,
@@ -61,41 +82,43 @@ export class StudentService {
       `).run(`np-${crypto.randomUUID()}`, studentId, now);
 
       createdStudent = db.prepare('SELECT * FROM students WHERE id = ?').get(studentId);
-    })();
 
-    // Handle Roommate Mode
-    if (input.roommate_mode === 'KNOWN') {
-      if (input.group_invite_code && input.group_invite_code.trim()) {
-        // Joining existing group
-        group = BookingGroupService.joinGroup(studentId, input.group_invite_code, !!input.auto_complete_triple_consent);
-      } else {
-        // Creating new booking group as leader
-        group = BookingGroupService.createGroup({
-          studentId,
-          hostelCode: input.gender,
-          targetCapacity: input.preferred_occupancy,
-          autoCompleteTripleConsent: !!input.auto_complete_triple_consent
-        });
+      // Handle Roommate Mode inside this same transaction so any
+      // downstream failure rolls the student row back instead of
+      // leaving an orphan record that blocks retry.
+      if (parsed.roommate_mode === 'KNOWN') {
+        if (parsed.group_invite_code) {
+          // Joining existing group
+          group = BookingGroupService.joinGroup(studentId, parsed.group_invite_code, parsed.auto_complete_triple_consent);
+        } else {
+          // Creating new booking group as leader
+          group = BookingGroupService.createGroup({
+            studentId,
+            hostelCode: parsed.gender,
+            targetCapacity: parsed.preferred_occupancy,
+            autoCompleteTripleConsent: parsed.auto_complete_triple_consent
+          });
+        }
+      } else if (parsed.roommate_mode === 'RANDOM' && parsed.consent_random_matching) {
+        // Opt into random matching queue
+        const queueId = MatchingService.addToQueue(studentId, parsed.gender, parsed.preferred_occupancy);
+        queueItem = { id: queueId, student_id: studentId, status: 'WAITING' };
       }
-    } else if (input.roommate_mode === 'RANDOM' && input.consent_random_matching) {
-      // Opt into random matching queue
-      const queueId = MatchingService.addToQueue(studentId, input.gender, input.preferred_occupancy);
-      queueItem = { id: queueId, student_id: studentId, status: 'WAITING' };
-    }
 
-    AuditService.log({
-      adminId,
-      action: 'REGISTER_STUDENT',
-      entityType: 'STUDENT',
-      entityId: studentId,
-      newValues: {
-        name: input.full_name,
-        phone: cleanPhone,
-        gender: input.gender,
-        roommate_mode: input.roommate_mode
-      },
-      notes: `Student registered via ${adminId ? 'Dashboard' : 'WhatsApp channel'}`
-    });
+      AuditService.log({
+        adminId,
+        action: 'REGISTER_STUDENT',
+        entityType: 'STUDENT',
+        entityId: studentId,
+        newValues: {
+          name: parsed.full_name,
+          phone: cleanPhone,
+          gender: parsed.gender,
+          roommate_mode: parsed.roommate_mode
+        },
+        notes: `Student registered via ${adminId ? 'Dashboard' : 'WhatsApp channel'}`
+      });
+    })();
 
     const fullRecord = this.getStudentById(studentId)!;
     return { student: fullRecord, group, queueItem };
@@ -192,9 +215,18 @@ export class StudentService {
 
   static getStudentByPhone(phoneNumber: string): Student | null {
     const db = getDb();
-    const student = db.prepare('SELECT id FROM students WHERE phone_number = ?').get(phoneNumber.trim()) as any;
-    if (!student) return null;
-    return this.getStudentById(student.id);
+    // Canonical-first lookup that remains compatible with legacy rows stored
+    // before canonicalization (bare digits or separator variants).
+    for (const candidate of phoneLookupCandidates(phoneNumber)) {
+      const student = db.prepare('SELECT id FROM students WHERE phone_number = ?').get(candidate) as any;
+      if (student) return this.getStudentById(student.id);
+    }
+    return null;
+  }
+
+  /** Escape LIKE wildcards so manager search cannot over-match. */
+  private static escapeLikeSearch(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
   }
 
   static getStudents(params?: {
@@ -216,8 +248,8 @@ export class StudentService {
       sqlParams.push(params.level);
     }
     if (params?.search) {
-      query += ' AND (full_name LIKE ? OR phone_number LIKE ? OR department LIKE ?)';
-      const s = `%${params.search}%`;
+      query += ' AND (full_name LIKE ? ESCAPE \'\\\' OR phone_number LIKE ? ESCAPE \'\\\' OR department LIKE ? ESCAPE \'\\\')';
+      const s = `%${this.escapeLikeSearch(params.search)}%`;
       sqlParams.push(s, s, s);
     }
 

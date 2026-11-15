@@ -75,6 +75,32 @@ export class SimulatorProvider implements WhatsAppProvider {
     return { success: true, messageId: id, simulated: true };
   }
 
+  async sendListMenu(to: string, bodyText: string, buttonText: string, sections: { title?: string; rows: { id: string; title: string; description?: string }[] }[]): Promise<any> {
+    const id = `sim-out-${crypto.randomUUID()}`;
+    const timestamp = new Date().toISOString();
+    const flatButtons = sections.flatMap(s => s.rows.map(r => ({ id: r.id, title: r.title }))).slice(0, 10);
+    const msg: SimulatedMessage = { id, to, type: 'interactive', text: `${bodyText}\n[${buttonText}]`, buttons: flatButtons, timestamp } as any;
+    (msg as any).listSections = sections;
+    this.saveMessage(msg);
+    return { success: true, messageId: id, simulated: true };
+  }
+
+  async sendTemplateMessage(to: string, templateName: string, _languageCode: string, bodyParams: string[]): Promise<any> {
+    const id = `sim-out-${crypto.randomUUID()}`;
+    const timestamp = new Date().toISOString();
+    const msg: SimulatedMessage = { id, to, type: 'text', text: `[TEMPLATE ${templateName}] ${bodyParams.join(' | ')}`, timestamp };
+    this.saveMessage(msg);
+    return { success: true, messageId: id, simulated: true };
+  }
+
+  async sendImageBuffer(to: string, pngBuffer: Buffer, caption?: string): Promise<any> {
+    const id = `sim-out-${crypto.randomUUID()}`;
+    const timestamp = new Date().toISOString();
+    const msg: SimulatedMessage = { id, to, type: 'image', imageUrl: `data:image/png;base64,${pngBuffer.toString('base64').slice(0, 64)}…(${pngBuffer.length} bytes)`, caption, timestamp };
+    this.saveMessage(msg);
+    return { success: true, messageId: id, simulated: true };
+  }
+
   async sendImageMessage(to: string, imageUrl: string, caption?: string): Promise<any> {
     const id = `sim-out-${crypto.randomUUID()}`;
     const timestamp = new Date().toISOString();

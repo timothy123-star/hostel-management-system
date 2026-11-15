@@ -2,6 +2,8 @@ import crypto from 'crypto';
 import { getDb } from '../db/connection.js';
 import { Payment, PaymentStatus, HostelCode } from '@hostel/shared';
 import { AuditService } from './auditService.js';
+import { config as appConfig } from '../config.js';
+import { WhatsAppNotificationService } from './whatsapp/whatsappNotifications.js';
 
 export class PaymentService {
   static readonly demoBank = { name: 'HostelOS DEMO Bank — NO REAL MONEY', accountName: 'HostelOS Accommodation DEMO ONLY', accountNumber: '0001234567-DEMO' };
@@ -33,9 +35,15 @@ export class PaymentService {
 
   static verifyPayment(paymentId: string, adminId?: string, notes?: string): Payment {
     const db = getDb();
+    if (!adminId) {
+      throw new Error('An authenticated manager is required to approve a payment.');
+    }
     const existing = db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId) as any;
     if (!existing) {
       throw new Error(`Payment with ID ${paymentId} not found`);
+    }
+    if (existing.status !== 'PENDING') {
+      throw new Error(`Only pending payments can be approved. This payment is already ${existing.status.toLowerCase()}.`);
     }
     if (existing.reconciliation_status === 'AWAITING_RECONCILIATION') {
       throw new Error('This demo transfer must be reconciled from the incoming bank ledger; direct verification is disabled.');
@@ -55,10 +63,25 @@ export class PaymentService {
       entityId: paymentId,
       oldValues: { status: existing.status },
       newValues: { status: 'VERIFIED', verified_at: now, notes },
-      notes: `Verified individual payment of $${existing.amount} (Ref: ${existing.reference_code})`
+      notes: `Manager approved individual payment of $${existing.amount} (Ref: ${existing.reference_code})`
     });
 
-    return db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId) as Payment;
+    const verified = db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId) as Payment;
+    try {
+      const student = db.prepare('SELECT phone_number FROM students WHERE id = ?').get((verified as any).student_id) as any;
+      if (student?.phone_number) {
+        WhatsAppNotificationService.queueAndSend({
+          dedupeKey: `payment-approved:${paymentId}`,
+          studentId: (verified as any).student_id,
+          phone: student.phone_number,
+          kind: 'PAYMENT_APPROVED',
+          bodyText: `✅ Payment approved: $${(verified as any).amount} ${(verified as any).currency} (Ref: ${(verified as any).reference_code}). DEMO ONLY — no real money. Please attach a clear face photograph directly to this WhatsApp chat for manager review.`,
+          templateName: appConfig.whatsappTemplates.paymentApproved,
+          templateParams: [String((verified as any).amount), String((verified as any).currency), String((verified as any).reference_code)],
+        });
+      }
+    } catch { /* notification must not break approval */ }
+    return verified;
   }
 
   static getStudentInstructions(phone: string) {
@@ -118,7 +141,7 @@ export class PaymentService {
     }
     db.transaction(() => {
       db.prepare("UPDATE demo_bank_transactions SET reconciliation_status = 'RECONCILED', reconciled_at = ?, reconciled_by_admin_id = ?, updated_at = ? WHERE id = ?").run(now, adminId || null, now, transactionId);
-      db.prepare("UPDATE payments SET status = 'VERIFIED', reconciliation_status = 'RECONCILED', verified_by_admin_id = ?, verified_at = ?, notes = ?, updated_at = ? WHERE id = ?").run(adminId || null, now, `Reconciled DEMO bank transaction ${txn.bank_transaction_reference}`, now, payment.id);
+      db.prepare("UPDATE payments SET reconciliation_status = 'RECONCILED', updated_at = ? WHERE id = ?").run(now, payment.id);
     })();
     AuditService.log({ adminId, action: 'RECONCILE_DEMO_BANK_TRANSACTION', entityType: 'DEMO_BANK_TRANSACTION', entityId: transactionId, newValues: { payment_id: payment.id, amount: txn.amount }, notes: `DEMO ONLY reconciliation of ${txn.bank_transaction_reference} to ${payment.reference_code}` });
     return db.prepare('SELECT * FROM payments WHERE id = ?').get(payment.id) as Payment;
@@ -137,17 +160,23 @@ export class PaymentService {
 
   static rejectPayment(paymentId: string, reason: string, adminId?: string): Payment {
     const db = getDb();
+    if (!adminId) {
+      throw new Error('An authenticated manager is required to reject a payment.');
+    }
     const existing = db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId) as any;
     if (!existing) {
       throw new Error(`Payment with ID ${paymentId} not found`);
+    }
+    if (existing.status !== 'PENDING') {
+      throw new Error(`Only pending payments can be rejected. This payment is already ${existing.status.toLowerCase()}.`);
     }
 
     const now = new Date().toISOString();
     db.prepare(`
       UPDATE payments 
-      SET status = 'REJECTED', verified_by_admin_id = ?, verified_at = ?, notes = ?, updated_at = ?
+      SET status = 'REJECTED', notes = ?, updated_at = ?
       WHERE id = ?
-    `).run(adminId || null, now, reason, now, paymentId);
+    `).run(reason, now, paymentId);
 
     AuditService.log({
       adminId,
@@ -159,6 +188,21 @@ export class PaymentService {
       notes: `Rejected individual payment (Ref: ${existing.reference_code}): ${reason}`
     });
 
-    return db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId) as Payment;
+    const rejected = db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId) as Payment;
+    try {
+      const student = db.prepare('SELECT phone_number FROM students WHERE id = ?').get((rejected as any).student_id) as any;
+      if (student?.phone_number) {
+        WhatsAppNotificationService.queueAndSend({
+          dedupeKey: `payment-rejected:${paymentId}`,
+          studentId: (rejected as any).student_id,
+          phone: student.phone_number,
+          kind: 'PAYMENT_REJECTED',
+          bodyText: `❌ Payment not approved (Ref: ${(rejected as any).reference_code}). Reason: ${reason}. DEMO ONLY — no real money. Please correct the issue and tap PAYMENT INSTRUCTIONS to retry; a manager must still verify it.`,
+          templateName: appConfig.whatsappTemplates.paymentRejected,
+          templateParams: [String((rejected as any).reference_code), String(reason)],
+        });
+      }
+    } catch { /* notification must not break rejection */ }
+    return rejected;
   }
 }

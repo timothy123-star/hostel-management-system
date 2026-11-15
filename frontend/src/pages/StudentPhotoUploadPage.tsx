@@ -42,6 +42,10 @@ export const StudentPhotoUploadPage: React.FC<{ token: string }> = ({ token }) =
   return <main className="min-h-screen bg-slate-100 px-4 py-10 flex items-center justify-center">
     <section className="w-full max-w-md rounded-2xl bg-white p-6 shadow-sm border border-slate-200 space-y-5">
       <div><p className="text-xs font-bold tracking-widest text-brand-600">HOSTELOS</p><h1 className="text-2xl font-bold text-slate-900 mt-1">Submit your photograph</h1></div>
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+        <p className="font-bold mb-1">Before you upload — please read</p>
+        <p>Your photograph will be reviewed by hostel management. Once approved, it will appear alongside your name, facility and room when authorized staff scan your QR identity pass for verification. By tapping “Submit photograph” you grant permission for this approved-photo display. A pending or rejected photo is never shown.</p>
+      </div>
       <p className="text-sm text-slate-600" role="status">{message}</p>
       {ready && <>
         {preview && <img src={preview} alt="Selected photograph preview" className="w-full aspect-square rounded-xl object-cover bg-slate-100" />}
@@ -50,7 +54,7 @@ export const StudentPhotoUploadPage: React.FC<{ token: string }> = ({ token }) =
           <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="user" onChange={e => chooseFile(e.target.files?.[0])} />
         </label>
         <button disabled={!file || submitting} onClick={submit} className="w-full rounded-xl bg-slate-900 py-3 text-sm font-semibold text-white disabled:opacity-50">
-          {submitting ? 'Uploading…' : 'Submit photograph'}
+          {submitting ? 'Uploading…' : 'Submit photograph — I agree to approved-photo display'}
         </button>
       </>}
     </section>

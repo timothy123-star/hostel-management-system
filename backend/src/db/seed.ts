@@ -4,7 +4,14 @@ import { getDb, initSchema, resetDb } from './connection.js';
 import { config } from '../config.js';
 import { QRService } from '../services/qrService.js';
 
-export async function runSeed(reset = false) {
+export function assertDemoSeedingAllowed(nodeEnv = config.nodeEnv): void {
+  if (nodeEnv === 'production') {
+    throw new Error('Demo seeding and database reset are disabled in production.');
+  }
+}
+
+export async function runSeed(reset = false, nodeEnv = config.nodeEnv) {
+  assertDemoSeedingAllowed(nodeEnv);
   if (reset) {
     resetDb();
   }
@@ -504,5 +511,8 @@ export async function runSeed(reset = false) {
 }
 
 if (process.argv[1]?.endsWith('seed.ts') || process.argv[1]?.endsWith('seed.js')) {
-  runSeed().catch(console.error);
+  runSeed().catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
 }
