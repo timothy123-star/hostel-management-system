@@ -41,3 +41,50 @@ html, body {
     font-size: inherit;
   }
 }
+
+/* Manager gate-scanner camera viewport (QRScannerModal only).
+   Fills the modal container, centers the live feed on both axes,
+   preserves the camera aspect ratio via object-fit, and keeps a large
+   recognition area without clipping or excess blank space. */
+.manager-qr-viewport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 300px;
+  aspect-ratio: 1 / 1;
+  max-height: 420px;
+  background: #0f172a;
+}
+@media (min-width: 640px) {
+  .manager-qr-viewport {
+    min-height: 340px;
+  }
+}
+.manager-qr-viewport .manager-qr-reader {
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.manager-qr-viewport .manager-qr-reader > div {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.manager-qr-viewport video {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 420px;
+  object-fit: cover !important;
+  object-position: center !important;
+  border-radius: 0.75rem;
+  background: #0f172a;
+}
+.manager-qr-viewport img {
+  margin-left: auto;
+  margin-right: auto;
+}
