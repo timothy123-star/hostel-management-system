@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS admin_users (
   password_hash TEXT NOT NULL,
   full_name TEXT NOT NULL,
   email TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'MANAGER' CHECK (role IN ('MANAGER', 'SECURITY')),
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+  must_change_password INTEGER NOT NULL DEFAULT 0 CHECK (must_change_password IN (0, 1)),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -275,9 +278,12 @@ CREATE TABLE IF NOT EXISTS access_logs (
   verification_channel TEXT NOT NULL DEFAULT 'MANAGER' CHECK (verification_channel IN ('MANAGER', 'PUBLIC_BROWSER')),
   outcome TEXT NOT NULL CHECK (outcome IN ('GRANTED', 'DENIED')),
   reason TEXT,
+  staff_role TEXT NOT NULL DEFAULT 'MANAGER' CHECK (staff_role IN ('MANAGER', 'SECURITY')),
+  credential_fingerprint TEXT,
   logged_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_access_logs_time ON access_logs(logged_at);
+CREATE INDEX IF NOT EXISTS idx_access_logs_credential ON access_logs(resident_qr_credential_id, logged_at);
 
 -- 12. Announcements
 CREATE TABLE IF NOT EXISTS announcements (

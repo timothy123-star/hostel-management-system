@@ -138,7 +138,7 @@ export const WhatsAppSimulatorPage: React.FC = () => {
             <div className="w-32 h-4 bg-slate-800 rounded-full mx-auto mb-3" />
 
             {/* Simulated Phone Screen */}
-            <div className="bg-[#e5ddd5] rounded-[28px] overflow-hidden flex flex-col h-[640px] shadow-inner relative">
+            <div className="bg-[#e5ddd5] rounded-[28px] overflow-hidden flex flex-col h-[min(640px,72dvh)] min-h-[420px] shadow-inner relative">
               {/* WhatsApp App Header */}
               <div className="bg-[#075e54] text-white px-4 py-3 flex items-center justify-between shadow-md shrink-0">
                 <div className="flex items-center gap-3">
@@ -237,31 +237,31 @@ export const WhatsAppSimulatorPage: React.FC = () => {
               <div className="px-3 py-1.5 bg-slate-100/90 border-t border-slate-200 flex items-center gap-1.5 overflow-x-auto text-[11px]">
                 <button
                   onClick={() => handleSendMessage('MENU')}
-                  className="px-2 py-1 bg-white hover:bg-slate-200 rounded-md font-semibold text-slate-700 border shrink-0"
+                  className="min-h-[44px] px-2 py-1 bg-white hover:bg-slate-200 rounded-md font-semibold text-slate-700 border shrink-0"
                 >
                   MENU
                 </button>
                 <button
                   onClick={() => handleSendMessage('QR')}
-                  className="px-2 py-1 bg-brand-50 hover:bg-brand-100 rounded-md font-semibold text-brand-800 border border-brand-200 shrink-0"
+                  className="min-h-[44px] px-2 py-1 bg-brand-50 hover:bg-brand-100 rounded-md font-semibold text-brand-800 border border-brand-200 shrink-0"
                 >
                   Show QR
                 </button>
                 <button
                   onClick={() => handleSendMessage('BOOK')}
-                  className="px-2 py-1 bg-white hover:bg-slate-200 rounded-md font-semibold text-slate-700 border shrink-0"
+                  className="min-h-[44px] px-2 py-1 bg-white hover:bg-slate-200 rounded-md font-semibold text-slate-700 border shrink-0"
                 >
                   BOOK
                 </button>
                 <button
                   onClick={() => handleSendMessage('STATUS')}
-                  className="px-2 py-1 bg-white hover:bg-slate-200 rounded-md font-semibold text-slate-700 border shrink-0"
+                  className="min-h-[44px] px-2 py-1 bg-white hover:bg-slate-200 rounded-md font-semibold text-slate-700 border shrink-0"
                 >
                   STATUS
                 </button>
                 <button
                   onClick={() => handleSendMessage('HELP')}
-                  className="px-2 py-1 bg-white hover:bg-slate-200 rounded-md font-semibold text-slate-700 border shrink-0"
+                  className="min-h-[44px] px-2 py-1 bg-white hover:bg-slate-200 rounded-md font-semibold text-slate-700 border shrink-0"
                 >
                   HELP
                 </button>

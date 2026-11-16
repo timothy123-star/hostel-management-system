@@ -14,7 +14,9 @@ import {
   MessageSquare,
   LogOut,
   ShieldCheck,
-  Camera
+  Camera,
+  KeyRound,
+  X
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.js';
 
@@ -22,9 +24,11 @@ interface SidebarProps {
   currentPath: string;
   onNavigate: (path: string) => void;
   onOpenScanner: () => void;
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentPath, onNavigate, onOpenScanner }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ currentPath, onNavigate, onOpenScanner, mobileOpen = false, onCloseMobile }) => {
   const { user, logout } = useAuth();
 
   const navItems = [
@@ -38,6 +42,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPath, onNavigate, onOpe
     { path: '/matching-queue', label: 'Matching Queue', icon: Users },
     { path: '/payments', label: 'Payments & Approvals', icon: CreditCard },
     { path: '/qr-identity', label: 'QR Digital Identity', icon: QrCode },
+    { path: '/security-accounts', label: 'Security Accounts', icon: KeyRound },
     { path: '/renewals', label: 'Expiries & Renewals', icon: CalendarClock },
     { path: '/announcements', label: 'Bulk Announcements', icon: Megaphone },
     { path: '/reports', label: 'Reports & Export', icon: FileSpreadsheet },
@@ -45,24 +50,50 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPath, onNavigate, onOpe
     { path: '/whatsapp', label: 'WhatsApp & Simulator', icon: MessageSquare, badge: 'Live / Sim' }
   ];
 
+  const go = (path: string) => {
+    onNavigate(path);
+    onCloseMobile?.();
+  };
+
   return (
-    <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 min-h-screen border-r border-slate-800 select-none">
+    <>
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-slate-950/60 md:hidden"
+          onClick={onCloseMobile}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 w-64 max-w-[85vw] bg-slate-900 text-slate-300 flex flex-col shrink-0 min-h-screen border-r border-slate-800 select-none transform transition-transform duration-200 md:static md:z-auto md:translate-x-0 ${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
       {/* Brand Header */}
       <div className="p-5 border-b border-slate-800 flex items-center gap-3">
+        <div className="flex-1 flex items-center gap-3 min-w-0">
         <div className="w-9 h-9 rounded-xl bg-brand-500 flex items-center justify-center text-slate-950 font-bold shadow-md shadow-brand-500/20">
           <ShieldCheck className="w-5 h-5 text-slate-950" />
         </div>
-        <div>
-          <h1 className="font-bold text-white text-base tracking-tight leading-none">HostelOS</h1>
-          <p className="text-[11px] text-slate-400 mt-1 font-medium">Digital Hostel & Security</p>
+          <div className="min-w-0">
+            <h1 className="font-bold text-white text-base tracking-tight leading-none">HostelOS</h1>
+            <p className="text-[11px] text-slate-400 mt-1 font-medium">Digital Hostel & Security</p>
+          </div>
         </div>
+        <button
+          onClick={onCloseMobile}
+          className="md:hidden min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-slate-800"
+          aria-label="Close navigation"
+        >
+          <X className="w-5 h-5" />
+        </button>
       </div>
 
       {/* Quick Action: QR Scan Button */}
       <div className="p-4">
         <button
-          onClick={onOpenScanner}
-          className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-brand-500 hover:bg-brand-600 text-slate-950 font-semibold rounded-xl text-xs transition shadow-sm"
+          onClick={() => { onOpenScanner(); onCloseMobile?.(); }}
+          className="w-full min-h-[44px] flex items-center justify-center gap-2 py-2.5 px-3 bg-brand-500 hover:bg-brand-600 text-slate-950 font-semibold rounded-xl text-xs transition shadow-sm"
         >
           <QrCode className="w-4 h-4 text-slate-950" />
           Verify Student Pass
@@ -78,7 +109,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPath, onNavigate, onOpe
           return (
             <button
               key={item.path}
-              onClick={() => onNavigate(item.path)}
+              onClick={() => go(item.path)}
               className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-colors ${
                 isActive
                   ? 'bg-slate-800 text-white font-semibold shadow-inner'
@@ -120,6 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPath, onNavigate, onOpe
           </button>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 };

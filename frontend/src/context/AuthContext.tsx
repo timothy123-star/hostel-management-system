@@ -5,8 +5,9 @@ interface AuthContextType {
   user: any | null;
   token: string | null;
   isLoading: boolean;
-  login: (credentials: { username: string; password: string }) => Promise<void>;
+  login: (credentials: { username: string; password: string }) => Promise<any>;
   logout: () => void;
+  refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -41,6 +42,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(res.user);
     localStorage.setItem('hostel_admin_token', res.token);
     localStorage.setItem('hostel_admin_user', JSON.stringify(res.user));
+    return res.user;
+  };
+
+  const refresh = async () => {
+    const res = await api.getMe();
+    setUser(res.user);
+    localStorage.setItem('hostel_admin_user', JSON.stringify(res.user));
   };
 
   const logout = () => {
@@ -51,7 +59,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, token, isLoading, login, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   );

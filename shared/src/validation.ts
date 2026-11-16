@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+/** Minimum length for SECURITY temporary passwords and first-login replacements.
+ * Manager credentials are unaffected. Frontend minLength hints mirror this. */
+export const SECURITY_PASSWORD_MIN_LENGTH = 12;
+
 export const LoginSchema = z.object({
   username: z.string().min(1, 'Username is required'),
   password: z.string().min(1, 'Password is required')

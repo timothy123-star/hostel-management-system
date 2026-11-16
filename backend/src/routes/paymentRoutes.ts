@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { PaymentService } from '../services/paymentService.js';
-import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddleware.js';
+import { authMiddleware, requireManager, AuthenticatedRequest } from '../middleware/authMiddleware.js';
 import { VerifyPaymentSchema, RejectPaymentSchema } from '@hostel/shared';
 
 export const paymentRouter = Router();
-paymentRouter.use(authMiddleware);
+paymentRouter.use(authMiddleware, requireManager);
 
 paymentRouter.get('/', (req, res, next) => {
   try {
@@ -34,7 +34,7 @@ paymentRouter.post('/demo-transactions/:id/reject', (req: AuthenticatedRequest, 
   } catch (err) { next(err); }
 });
 
-paymentRouter.post('/:id/verify', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+paymentRouter.post('/:id/verify', authMiddleware, requireManager, (req: AuthenticatedRequest, res, next) => {
   try {
     const input = VerifyPaymentSchema.parse(req.body);
     const payment = PaymentService.verifyPayment(req.params.id, req.admin?.id, input.notes);
@@ -44,7 +44,7 @@ paymentRouter.post('/:id/verify', authMiddleware, (req: AuthenticatedRequest, re
   }
 });
 
-paymentRouter.post('/:id/reject', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+paymentRouter.post('/:id/reject', authMiddleware, requireManager, (req: AuthenticatedRequest, res, next) => {
   try {
     const input = RejectPaymentSchema.parse(req.body);
     const payment = PaymentService.rejectPayment(req.params.id, input.reason, req.admin?.id);

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext.js';
 import { ShieldCheck, Lock, User, AlertCircle, Sparkles } from 'lucide-react';
 
-export const LoginPage: React.FC = () => {
+export const LoginPage: React.FC<{ onDone?: (path: string) => void }> = ({ onDone }) => {
   const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -14,7 +14,21 @@ export const LoginPage: React.FC = () => {
     setError(null);
     setIsSubmitting(true);
     try {
-      await login({ username, password });
+      const user = await login({ username, password });
+      if (user?.must_change_password === true) {
+        try { sessionStorage.removeItem('hostel_pending_scan'); } catch { /* private mode */ }
+        onDone?.('/security/change-password');
+        return;
+      }
+      const pendingScan = sessionStorage.getItem('hostel_pending_scan');
+      if (pendingScan) {
+        sessionStorage.removeItem('hostel_pending_scan');
+        onDone?.(`/resident-verification/${encodeURIComponent(pendingScan)}`);
+      } else if (user?.role === 'SECURITY') {
+        onDone?.('/security/scan');
+      } else {
+        onDone?.('/');
+      }
     } catch (err: any) {
       setError(err.message || 'Login failed. Please verify your credentials.');
     } finally {

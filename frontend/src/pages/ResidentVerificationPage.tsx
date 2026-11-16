@@ -19,9 +19,11 @@ export const ResidentVerificationPage: React.FC<{ token: string }> = ({ token })
     let objectUrl: string | null = null;
     const adminToken = localStorage.getItem('hostel_admin_token');
     if (!adminToken) {
+      try { sessionStorage.setItem('hostel_pending_scan', token); } catch { /* private mode */ }
       setState({ kind: 'restricted', reason: 'Authorized staff sign-in is required before resident details can be shown.' });
       return;
     }
+    try { sessionStorage.removeItem('hostel_pending_scan'); } catch { /* private mode */ }
     (async () => {
       try {
         const response = await fetch(`/api/qr/staff/${encodeURIComponent(token)}`, {

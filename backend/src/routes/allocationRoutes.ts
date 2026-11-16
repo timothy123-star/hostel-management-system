@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { AllocationService } from '../services/allocationService.js';
-import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddleware.js';
+import { authMiddleware, requireManager, AuthenticatedRequest } from '../middleware/authMiddleware.js';
 import { FinalizeAllocationSchema, ReallocateStudentSchema } from '@hostel/shared';
 
 export const allocationRouter = Router();
 
-allocationRouter.post('/finalize', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
+allocationRouter.post('/finalize', authMiddleware, requireManager, async (req: AuthenticatedRequest, res, next) => {
   try {
     const input = FinalizeAllocationSchema.parse(req.body);
     const result = await AllocationService.finalizeGroupAllocation({
@@ -21,7 +21,7 @@ allocationRouter.post('/finalize', authMiddleware, async (req: AuthenticatedRequ
   }
 });
 
-allocationRouter.post('/reallocate', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+allocationRouter.post('/reallocate', authMiddleware, requireManager, (req: AuthenticatedRequest, res, next) => {
   try {
     const input = ReallocateStudentSchema.parse(req.body);
     const allocation = AllocationService.reallocateStudent({
@@ -36,7 +36,7 @@ allocationRouter.post('/reallocate', authMiddleware, (req: AuthenticatedRequest,
   }
 });
 
-allocationRouter.post('/groups/:id/reallocate', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+allocationRouter.post('/groups/:id/reallocate', authMiddleware, requireManager, (req: AuthenticatedRequest, res, next) => {
   try {
     const { new_room_id, reason } = req.body;
     if (!new_room_id || !reason || reason.trim().length < 3) throw new Error('A target room and documented reason are required.');

@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { StudentService } from '../services/studentService.js';
-import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddleware.js';
+import { authMiddleware, requireManager, AuthenticatedRequest } from '../middleware/authMiddleware.js';
 import { StudentRegistrationSchema } from '@hostel/shared';
 
 export const studentRouter = Router();
-studentRouter.use(authMiddleware);
+studentRouter.use(authMiddleware, requireManager);
 
 studentRouter.get('/', (req, res, next) => {
   try {
@@ -34,7 +34,7 @@ studentRouter.get('/:id', (req, res, next) => {
   }
 });
 
-studentRouter.post('/', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+studentRouter.post('/', authMiddleware, requireManager, (req: AuthenticatedRequest, res, next) => {
   try {
     const input = StudentRegistrationSchema.parse(req.body);
     const result = StudentService.registerStudent(input, req.admin?.id);

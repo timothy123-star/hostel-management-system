@@ -79,12 +79,13 @@ describe('resident QR credentials', () => {
     expect(QRService.getPublicVerification('not-a-valid-credential').status).toBe('INVALID_CREDENTIAL');
     const next = QRService.issueCredential(studentId, adminId, true);
     getDb().prepare("UPDATE payments SET status = 'PENDING' WHERE student_id = ? AND booking_group_id = 'grp-demo-01'").run(studentId);
-    expect(QRService.getPublicVerification(next.token).status).toBe('INVALID_CREDENTIAL');
+    // Unverified payment is an attention case for gate staff, not a fake credential.
+    expect(QRService.getPublicVerification(next.token).status).toBe('ATTENTION_REQUIRED');
     getDb().prepare("UPDATE payments SET status = 'VERIFIED' WHERE student_id = ? AND booking_group_id = 'grp-demo-01'").run(studentId);
     getDb().prepare("UPDATE room_allocations SET accommodation_start_date = '2999-01-01' WHERE id = 'alloc-demo-01'").run();
-    expect(QRService.getPublicVerification(next.token).status).toBe('INVALID_CREDENTIAL');
+    expect(QRService.getPublicVerification(next.token).status).toBe('ATTENTION_REQUIRED');
     getDb().prepare("UPDATE room_allocations SET accommodation_start_date = '2000-01-01', accommodation_end_date = '2000-01-02' WHERE id = 'alloc-demo-01'").run();
-    expect(QRService.getPublicVerification(next.token).status).toBe('INVALID_CREDENTIAL');
+    expect(QRService.getPublicVerification(next.token).status).toBe('EXPIRED');
     expect(getDb().prepare('SELECT status FROM resident_qr_credentials WHERE id = ?').get((next.credential as any).id)).toEqual({ status: 'EXPIRED' });
   });
 });

@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { RenewalService } from '../services/renewalService.js';
-import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddleware.js';
+import { authMiddleware, requireManager, AuthenticatedRequest } from '../middleware/authMiddleware.js';
 import { SendRenewalReminderSchema } from '@hostel/shared';
 
 export const renewalRouter = Router();
-renewalRouter.use(authMiddleware);
+renewalRouter.use(authMiddleware, requireManager);
 
 renewalRouter.get('/', (req, res, next) => {
   try {
@@ -16,7 +16,7 @@ renewalRouter.get('/', (req, res, next) => {
   }
 });
 
-renewalRouter.post('/send-reminders', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
+renewalRouter.post('/send-reminders', authMiddleware, requireManager, async (req: AuthenticatedRequest, res, next) => {
   try {
     const input = SendRenewalReminderSchema.parse(req.body);
     const result = await RenewalService.sendRenewalReminders({

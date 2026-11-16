@@ -5,7 +5,7 @@ import { WhatsAppWebhookSchema } from '@hostel/shared';
 import { WhatsAppService } from '../services/whatsapp/whatsappService.js';
 import { SimulatorProvider } from '../services/whatsapp/simulatorProvider.js';
 import { enqueueInboundMessage, listInboxFailures, runInboxCycle } from '../services/whatsapp/whatsappInbox.js';
-import { authMiddleware } from '../middleware/authMiddleware.js';
+import { authMiddleware, requireManager } from '../middleware/authMiddleware.js';
 import { config } from '../config.js';
 
 export const whatsappRouter = Router();
@@ -184,7 +184,7 @@ whatsappRouter.post('/webhook', async (req: any, res) => {
 /**
  * 2b. Manager notification outbox (errors visible to manager)
  */
-whatsappRouter.get('/notifications', async (req, res, next) => {
+whatsappRouter.get('/notifications', authMiddleware, requireManager, async (req, res, next) => {
   try {
     const { WhatsAppNotificationService } = await import('../services/whatsapp/whatsappNotifications.js');
     res.json({ notifications: WhatsAppNotificationService.getForManager(String(req.query.status || 'ALL')) });
@@ -197,7 +197,7 @@ whatsappRouter.get('/notifications', async (req, res, next) => {
  * Message text/button payloads are excluded; managers see routing
  * metadata, attempts, timestamps and the bounded error only.
  */
-whatsappRouter.get('/inbox/failures', authMiddleware, (req, res, next) => {
+whatsappRouter.get('/inbox/failures', authMiddleware, requireManager, (req, res, next) => {
   try {
     const limit = req.query.limit !== undefined ? parseInt(String(req.query.limit), 10) : 50;
     const offset = req.query.offset !== undefined ? parseInt(String(req.query.offset), 10) : 0;

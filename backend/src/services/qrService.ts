@@ -172,22 +172,25 @@ export class QRService {
     return credential || null;
   }
 
-  static verifyToken(rawToken: string, channel: Channel, method: Method = 'MANUAL_ENTRY', adminId?: string) {
+  static verifyToken(rawToken: string, channel: Channel, method: Method = 'MANUAL_ENTRY', adminId?: string, staffRole?: string) {
+    const fingerprint = this.fingerprintToken(rawToken);
     const tokenHash = this.hashToken(rawToken);
     const db = getDb();
     const credential = db.prepare(`SELECT c.*, s.full_name, s.id as student_id, s.department, s.academic_level
       FROM resident_qr_credentials c JOIN students s ON s.id = c.student_id WHERE c.token_hash = ?`).get(tokenHash) as any;
-    if (!credential) return this.logAndDeny(null, null, channel, method, adminId, 'Invalid or unrecognised credential.');
-    if (credential.status !== 'ACTIVE') return this.logAndDeny(credential.id, credential.student_id, channel, method, adminId, 'Credential is not active.');
+    if (!credential) return this.logAndDeny(null, null, channel, method, adminId, staffRole, fingerprint, 'Invalid or unrecognised credential.', 'INVALID_CREDENTIAL');
+    if (credential.status === 'EXPIRED') return this.logAndDeny(credential.id, credential.student_id, channel, method, adminId, staffRole, fingerprint, 'This credential has expired.', 'EXPIRED');
+    if (credential.status !== 'ACTIVE') return this.logAndDeny(credential.id, credential.student_id, channel, method, adminId, staffRole, fingerprint, 'Credential is not active.', 'INVALID_CREDENTIAL');
     const eligibility = this.getEligibility(credential.student_id);
     if (!eligibility.eligible) {
       if (eligibility.expired) db.prepare("UPDATE resident_qr_credentials SET status = 'EXPIRED', updated_at = ? WHERE id = ? AND status = 'ACTIVE'").run(new Date().toISOString(), credential.id);
-      return this.logAndDeny(credential.id, credential.student_id, channel, method, adminId, eligibility.reason);
+      const status = eligibility.expired ? 'EXPIRED' : 'ATTENTION_REQUIRED';
+      return this.logAndDeny(credential.id, credential.student_id, channel, method, adminId, staffRole, fingerprint, eligibility.reason, status);
     }
     const now = new Date().toISOString();
     db.transaction(() => {
       db.prepare('UPDATE resident_qr_credentials SET last_verified_at = ?, updated_at = ? WHERE id = ?').run(now, now, credential.id);
-      this.insertAccessLog(credential.id, credential.student_id, channel, method, adminId, 'GRANTED', 'Valid resident credential.');
+      this.insertAccessLog(credential.id, credential.student_id, channel, method, adminId, staffRole, fingerprint, 'GRANTED', 'Valid resident credential.');
     })();
     const allocation = eligibility.allocation;
     const base = { outcome: 'GRANTED', reason: 'Valid resident credential.',
@@ -229,8 +232,8 @@ export class QRService {
     return { available: true, reason: '', storageKey: photo.storage_key, mimeType: photo.mime_type };
   }
 
-  static getVerifiedPhoto(rawToken: string, channel: Channel = 'PUBLIC_BROWSER', adminId?: string) {
-    const result = this.verifyToken(rawToken, channel, 'MANUAL_ENTRY', adminId);
+  static getVerifiedPhoto(rawToken: string, channel: Channel = 'PUBLIC_BROWSER', adminId?: string, staffRole?: string) {
+    const result = this.verifyToken(rawToken, channel, 'MANUAL_ENTRY', adminId, staffRole);
     const verified = result as any;
     if (verified.outcome !== 'GRANTED' || !verified.student) throw new Error('Credential is not valid.');
     const availability = this.getPhotoAvailability(verified.student.id);
@@ -242,9 +245,9 @@ export class QRService {
     return { storagePath, mimeType };
   }
 
-  static getPublicVerification(rawToken: string, channel: Channel = 'PUBLIC_BROWSER', adminId?: string) {
-    const result = this.verifyToken(rawToken, channel, 'MANUAL_ENTRY', adminId);
-    if (result.outcome !== 'GRANTED') return { status: 'INVALID_CREDENTIAL', reason: result.reason };
+  static getPublicVerification(rawToken: string, channel: Channel = 'PUBLIC_BROWSER', adminId?: string, staffRole?: string) {
+    const result = this.verifyToken(rawToken, channel, 'MANUAL_ENTRY', adminId, staffRole);
+    if (result.outcome !== 'GRANTED') return { status: (result as any).status || 'INVALID_CREDENTIAL', reason: result.reason };
     const verified = result as any;
     const availability = this.getPhotoAvailability(verified.student.id);
     return {
@@ -288,13 +291,56 @@ export class QRService {
     return { eligible: true, reason: '', allocation };
   }
 
-  private static logAndDeny(credentialId: string | null, studentId: string | null, channel: Channel, method: Method, adminId: string | undefined, reason: string) {
-    this.insertAccessLog(credentialId, studentId, channel, method, adminId, 'DENIED', reason);
-    return { outcome: 'DENIED', reason };
+  /** SHA-256 fingerprint of the presented credential: safe to store for
+   * unknown tokens too, since the raw token is never persisted. */
+  static fingerprintToken(rawToken: string) {
+    return crypto.createHash('sha256').update(String(rawToken || '').trim()).digest('hex');
   }
 
-  private static insertAccessLog(credentialId: string | null, studentId: string | null, channel: Channel, method: Method, adminId: string | undefined, outcome: 'GRANTED' | 'DENIED', reason: string) {
-    getDb().prepare(`INSERT INTO access_logs (id, resident_qr_credential_id, student_id, verified_by_admin_id, verification_method, verification_channel, outcome, reason, logged_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`).run(`acc-${crypto.randomUUID()}`, credentialId, studentId, adminId || null, method, channel, outcome, reason);
+  private static logAndDeny(credentialId: string | null, studentId: string | null, channel: Channel, method: Method, adminId: string | undefined, staffRole: string | undefined, fingerprint: string | null, reason: string, status: 'INVALID_CREDENTIAL' | 'EXPIRED' | 'ATTENTION_REQUIRED') {
+    this.insertAccessLog(credentialId, studentId, channel, method, adminId, staffRole, fingerprint, 'DENIED', reason);
+    return { outcome: 'DENIED', status, reason };
+  }
+
+  private static insertAccessLog(credentialId: string | null, studentId: string | null, channel: Channel, method: Method, adminId: string | undefined, staffRole: string | undefined, fingerprint: string | null, outcome: 'GRANTED' | 'DENIED', reason: string) {
+    const role = staffRole === 'SECURITY' ? 'SECURITY' : 'MANAGER';
+    getDb().prepare(`INSERT INTO access_logs (id, resident_qr_credential_id, student_id, verified_by_admin_id, verification_method, verification_channel, outcome, reason, staff_role, credential_fingerprint, logged_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`).run(`acc-${crypto.randomUUID()}`, credentialId, studentId, adminId || null, method, channel, outcome, reason, role, fingerprint);
+  }
+
+  /**
+   * Manager-only scan audit. Returns recent scans (no raw tokens, hashes or
+   * secrets) plus suspicious-reuse flags for review. Routine repeat scans
+   * never block a resident; flags are advisory only.
+   */
+  static getScanAudit(limit = 50) {
+    const db = getDb();
+    const scans = db.prepare(`SELECT al.id, al.resident_qr_credential_id AS credential_id, al.student_id,
+        s.full_name AS student_name, al.verified_by_admin_id AS staff_id, au.username AS staff_username,
+        al.staff_role, al.verification_method AS method, al.outcome, al.reason, al.logged_at
+      FROM access_logs al
+      LEFT JOIN students s ON s.id = al.student_id
+      LEFT JOIN admin_users au ON au.id = al.verified_by_admin_id
+      WHERE al.resident_qr_credential_id IS NOT NULL OR al.credential_fingerprint IS NOT NULL
+      ORDER BY al.logged_at DESC LIMIT ?`).all(limit) as any[];
+    const flags: any[] = [];
+    const sharedUse = db.prepare(`SELECT resident_qr_credential_id AS credential_id, COUNT(DISTINCT verified_by_admin_id) AS staff_count,
+        MIN(logged_at) AS first_seen, MAX(logged_at) AS last_seen
+      FROM access_logs
+      WHERE resident_qr_credential_id IS NOT NULL AND logged_at >= datetime('now', '-30 minutes')
+      GROUP BY resident_qr_credential_id HAVING staff_count > 1`).all() as any[];
+    for (const row of sharedUse) flags.push({ kind: 'SHARED_CREDENTIAL_USE', ...row });
+    const invalidBursts = db.prepare(`SELECT credential_fingerprint AS fingerprint, COUNT(*) AS attempts,
+        MIN(logged_at) AS first_seen, MAX(logged_at) AS last_seen
+      FROM access_logs
+      WHERE outcome = 'DENIED' AND logged_at >= datetime('now', '-10 minutes')
+      GROUP BY credential_fingerprint HAVING attempts >= 5`).all() as any[];
+    for (const row of invalidBursts) flags.push({ kind: 'REPEATED_INVALID_ATTEMPTS', ...row });
+    const revokedReuse = db.prepare(`SELECT al.id, al.resident_qr_credential_id AS credential_id, al.logged_at, al.verified_by_admin_id AS staff_id
+      FROM access_logs al JOIN resident_qr_credentials c ON c.id = al.resident_qr_credential_id
+      WHERE al.outcome = 'DENIED' AND c.status != 'ACTIVE' AND al.logged_at >= datetime('now', '-7 days')
+      ORDER BY al.logged_at DESC LIMIT 20`).all() as any[];
+    for (const row of revokedReuse) flags.push({ kind: 'REVOKED_CREDENTIAL_REUSE', ...row });
+    return { scans, flags };
   }
 }

@@ -145,6 +145,31 @@ export function initSchema(db: Database.Database) {
   if (!accessLogColumns.some(column => column.name === 'verification_channel')) {
     db.exec("ALTER TABLE access_logs ADD COLUMN verification_channel TEXT NOT NULL DEFAULT 'MANAGER'");
   }
+  if (!accessLogColumns.some(column => column.name === 'staff_role')) {
+    db.exec("ALTER TABLE access_logs ADD COLUMN staff_role TEXT NOT NULL DEFAULT 'MANAGER' CHECK (staff_role IN ('MANAGER', 'SECURITY'))");
+  }
+  if (!accessLogColumns.some(column => column.name === 'credential_fingerprint')) {
+    db.exec('ALTER TABLE access_logs ADD COLUMN credential_fingerprint TEXT');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_access_logs_credential ON access_logs(resident_qr_credential_id, logged_at)');
+
+  // Role-based access: existing administrator accounts keep full MANAGER
+  // privileges; SECURITY accounts are created explicitly by a manager.
+  const adminColumns = db.prepare("PRAGMA table_info(admin_users)").all() as any[];
+  if (!adminColumns.some(column => column.name === 'role')) {
+    db.exec("ALTER TABLE admin_users ADD COLUMN role TEXT NOT NULL DEFAULT 'MANAGER' CHECK (role IN ('MANAGER', 'SECURITY'))");
+  }
+  if (!adminColumns.some(column => column.name === 'is_active')) {
+    db.exec('ALTER TABLE admin_users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))');
+  }
+  if (!adminColumns.some(column => column.name === 'must_change_password')) {
+    db.exec('ALTER TABLE admin_users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0 CHECK (must_change_password IN (0, 1))');
+    // One-time backfill, runs only when the column is first added:
+    // pre-existing SECURITY accounts may still hold an unexpired temporary
+    // password, so they must change it on next login. MANAGER rows and any
+    // account created afterwards are deliberately untouched here.
+    db.exec("UPDATE admin_users SET must_change_password = 1 WHERE role = 'SECURITY'");
+  }
 
   // Preserve already-uploaded photographs when upgrading from the first photo
   // upload milestone into the review-history model.

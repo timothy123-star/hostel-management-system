@@ -22,3 +22,22 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* Mobile hardening: 16px inputs avoid iOS auto-zoom; never allow page-level
+   horizontal scroll (tables scroll inside their own containers instead). */
+html, body {
+  overflow-x: clip;
+}
+@supports not (overflow: clip) {
+  html, body {
+    overflow-x: hidden;
+  }
+}
+@media (max-width: 767px) {
+  input, select, textarea {
+    font-size: 16px;
+  }
+  input[type='checkbox'], input[type='radio'] {
+    font-size: inherit;
+  }
+}

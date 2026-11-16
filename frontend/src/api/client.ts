@@ -206,6 +206,16 @@ export const api = {
   // Audit Logs
   getAuditLogs: (limit = 100) => apiRequest<{ logs: any[] }>(`/audit-logs?limit=${limit}`),
 
+  // Staff accounts & scan audit
+  listSecurityAccounts: () => apiRequest<{ accounts: any[] }>('/auth/security-accounts'),
+  createSecurityAccount: (data: { username: string; password: string; full_name: string; email?: string }) =>
+    apiRequest<{ account: any }>('/auth/security-accounts', { method: 'POST', body: JSON.stringify(data) }),
+  setSecurityAccountActive: (id: string, is_active: boolean) =>
+    apiRequest<{ account: any }>(`/auth/security-accounts/${id}`, { method: 'PATCH', body: JSON.stringify({ is_active }) }),
+  changePassword: (current_password: string, new_password: string, confirm_password: string) =>
+    apiRequest<{ success: boolean; user: any }>('/auth/password', { method: 'PATCH', body: JSON.stringify({ current_password, new_password, confirm_password }) }),
+  getScanAudit: (limit = 50) => apiRequest<{ scans: any[]; flags: any[] }>(`/qr/scan-audit?limit=${limit}`),
+
   // WhatsApp
   getWhatsAppStatus: () => apiRequest<{ status: any }>('/whatsapp/status'),
   getInboxFailures: (limit = 20, offset = 0) =>

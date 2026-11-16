@@ -12,7 +12,8 @@ export function errorHandler(err: any, req: Request, res: Response, next: NextFu
 
   if (err instanceof Error) {
     console.error(`[Error] ${req.method} ${req.path}:`, err.message);
-    res.status(400).json({ error: err.message });
+    const status = typeof (err as any).status === 'number' ? (err as any).status : 400;
+    res.status(status).json({ error: err.message });
     return;
   }
 

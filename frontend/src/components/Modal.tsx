@@ -43,10 +43,10 @@ export const Modal: React.FC<ModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
       <div
-        className={`bg-white rounded-2xl shadow-2xl border border-slate-100 w-full ${widthClasses[maxWidth]} overflow-hidden transform transition-all max-h-[90vh] flex flex-col`}
+        className={`bg-white rounded-2xl shadow-2xl border border-slate-100 w-full ${widthClasses[maxWidth]} overflow-hidden transform transition-all max-h-[92dvh] sm:max-h-[90vh] flex flex-col`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-100 bg-slate-50/50">
           <h3 className="font-semibold text-lg text-slate-800">{title}</h3>
           <button
             onClick={onClose}
@@ -55,7 +55,7 @@ export const Modal: React.FC<ModalProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
+        <div className="p-4 sm:p-6 overflow-y-auto overflow-x-hidden flex-1 custom-scrollbar">
           {children}
         </div>
       </div>

@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { StatsService } from '../services/statsService.js';
-import { authMiddleware } from '../middleware/authMiddleware.js';
+import { authMiddleware, requireManager } from '../middleware/authMiddleware.js';
 
 export const statsRouter = Router();
-statsRouter.use(authMiddleware);
+statsRouter.use(authMiddleware, requireManager);
 
 statsRouter.get('/overview', (req, res, next) => {
   try {
@@ -14,7 +14,7 @@ statsRouter.get('/overview', (req, res, next) => {
   }
 });
 
-statsRouter.get('/export/:type', authMiddleware, (req, res, next) => {
+statsRouter.get('/export/:type', authMiddleware, requireManager, (req, res, next) => {
   try {
     const type = req.params.type as any;
     const csv = StatsService.generateCSV(type);

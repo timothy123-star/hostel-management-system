@@ -18,6 +18,9 @@ import { WhatsAppSimulatorPage } from './pages/WhatsAppSimulatorPage.js';
 import { StudentPhotoUploadPage } from './pages/StudentPhotoUploadPage.js';
 import { PhotoReviewsPage } from './pages/PhotoReviewsPage.js';
 import { ResidentVerificationPage } from './pages/ResidentVerificationPage.js';
+import { SecurityScannerPage } from './pages/SecurityScannerPage.js';
+import { SecurityAccountsPage } from './pages/SecurityAccountsPage.js';
+import { ForcePasswordChangePage } from './pages/ForcePasswordChangePage.js';
 
 function DashboardRouter() {
   const { user, isLoading } = useAuth();
@@ -62,7 +65,38 @@ function DashboardRouter() {
   if (verificationMatch) return <ResidentVerificationPage token={verificationMatch[1]} />;
 
   if (!user) {
-    return <LoginPage />;
+    return <LoginPage onDone={navigate} />;
+  }
+
+  const isManager = user.role === 'MANAGER' || !user.role;
+
+  // Mandatory first-login password change: no navigation escape, no direct-URL
+  // bypass. The flag comes from the authoritative /me record on every load,
+  // so refresh preserves the restriction until the backend clears it.
+  const mustChangePassword = !isManager && (user as any)?.must_change_password === true;
+  if (mustChangePassword) {
+    if (currentPath !== '/security/change-password') {
+      window.history.replaceState({}, '', '/security/change-password');
+      setCurrentPath('/security/change-password');
+    }
+    return <ForcePasswordChangePage onDone={navigate} />;
+  }
+
+  // SECURITY staff get a scanner-only experience: no manager navigation.
+  if (!isManager) {
+    if (currentPath === '/security/scan') return <SecurityScannerPage />;
+    // QR deep links stay reachable so a scanned pass completes after sign-in.
+    if (!verificationMatch) {
+      window.history.replaceState({}, '', '/security/scan');
+      setCurrentPath('/security/scan');
+      return <SecurityScannerPage />;
+    }
+  } else if (currentPath === '/security/scan') {
+    return (
+      <Layout currentPath={currentPath} onNavigate={navigate}>
+        <SecurityScannerPage />
+      </Layout>
+    );
   }
 
   const renderCurrentPage = () => {
@@ -95,6 +129,8 @@ function DashboardRouter() {
         return <ReportsPage />;
       case '/audit-logs':
         return <AuditLogsPage />;
+      case '/security-accounts':
+        return <SecurityAccountsPage />;
       case '/whatsapp':
         return <WhatsAppSimulatorPage />;
       default:

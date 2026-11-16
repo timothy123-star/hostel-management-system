@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { QRService } from '../services/qrService.js';
-import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddleware.js';
+import { authMiddleware, requireManager, requireScanRole, AuthenticatedRequest } from '../middleware/authMiddleware.js';
 import { VerifyQRTokenSchema, RevokeQRSchema } from '@hostel/shared';
 import { z } from 'zod';
 
@@ -33,27 +33,27 @@ function staffRateLimit(req: any, res: any, next: any) {
   next();
 }
 
-// Staff-only identity and photograph retrieval. Every route here requires an
-// authenticated staff session (authMiddleware): possession of the QR credential
-// alone never returns resident information. The QR code itself carries only the
-// opaque credential; the photograph is served through the authenticated photo
+// Authorized gate-scan endpoints. Both MANAGER and SECURITY roles may verify
+// residents here; possession of the QR credential alone never returns
+// resident information. The QR code itself carries only the opaque
+// credential; the photograph is served through the authenticated photo
 // endpoint below, never embedded in the code or exposed anonymously.
-qrRouter.get('/staff/:token', authMiddleware, staffRateLimit, (req: AuthenticatedRequest, res, next) => {
-  try { publicSecurityHeaders(res); res.json(QRService.getPublicVerification(req.params.token, 'MANAGER', req.admin?.id)); } catch (err) { next(err); }
+qrRouter.get('/staff/:token', authMiddleware, requireScanRole, staffRateLimit, (req: AuthenticatedRequest, res, next) => {
+  try { publicSecurityHeaders(res); res.json(QRService.getPublicVerification(req.params.token, 'MANAGER', req.admin?.id, req.admin?.role)); } catch (err) { next(err); }
 });
 
-qrRouter.get('/staff/:token/photo', authMiddleware, staffRateLimit, (req: AuthenticatedRequest, res, next) => {
+qrRouter.get('/staff/:token/photo', authMiddleware, requireScanRole, staffRateLimit, (req: AuthenticatedRequest, res, next) => {
   try {
-    const photo = QRService.getVerifiedPhoto(req.params.token, 'MANAGER', req.admin?.id);
+    const photo = QRService.getVerifiedPhoto(req.params.token, 'MANAGER', req.admin?.id, req.admin?.role);
     res.set({ 'Content-Type': photo.mimeType, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
     res.sendFile(photo.storagePath);
   } catch (err) { next(err); }
 });
 
-qrRouter.post('/verify', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+qrRouter.post('/verify', authMiddleware, requireScanRole, (req: AuthenticatedRequest, res, next) => {
   try {
     const input = VerifyQRTokenSchema.parse(req.body);
-    const result = QRService.verifyToken(input.token, 'MANAGER', input.method, req.admin?.id);
+    const result = QRService.verifyToken(input.token, 'MANAGER', input.method, req.admin?.id, req.admin?.role);
     res.json(result);
   } catch (err) {
     next(err);
@@ -61,7 +61,7 @@ qrRouter.post('/verify', authMiddleware, (req: AuthenticatedRequest, res, next) 
 });
 
 const IssueCredentialSchema = z.object({ reissue: z.boolean().default(false) });
-qrRouter.post('/credentials/:studentId/issue', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
+qrRouter.post('/credentials/:studentId/issue', authMiddleware, requireManager, async (req: AuthenticatedRequest, res, next) => {
   try {
     const input = IssueCredentialSchema.parse(req.body);
     const result = QRService.issueCredential(req.params.studentId, req.admin!.id, input.reissue);
@@ -71,7 +71,7 @@ qrRouter.post('/credentials/:studentId/issue', authMiddleware, async (req: Authe
   } catch (err) { next(err); }
 });
 
-qrRouter.post('/:id/revoke', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+qrRouter.post('/:id/revoke', authMiddleware, requireManager, (req: AuthenticatedRequest, res, next) => {
   try {
     const input = RevokeQRSchema.parse(req.body);
     const success = QRService.revokeCredential(req.params.id, input.reason, req.admin!.id);
@@ -80,23 +80,25 @@ qrRouter.post('/:id/revoke', authMiddleware, (req: AuthenticatedRequest, res, ne
       return;
     }
     res.json({ success: true, message: 'QR identity pass successfully revoked.' });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 });
 
-qrRouter.get('/credentials', authMiddleware, (req, res, next) => {
+qrRouter.get('/credentials', authMiddleware, requireManager, (req, res, next) => {
   try {
     res.json({ credentials: QRService.getCredentials() });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 });
 
-qrRouter.get('/access-logs', authMiddleware, (req, res, next) => {
+qrRouter.get('/access-logs', authMiddleware, requireManager, (req, res, next) => {
   try {
     res.json({ accessLogs: QRService.getAccessLogs() });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
+});
+
+// Manager-only scan audit: recent scans plus suspicious-reuse flags.
+qrRouter.get('/scan-audit', authMiddleware, requireManager, (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+    res.json(QRService.getScanAudit(limit));
+  } catch (err) { next(err); }
 });

@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { HostelService } from '../services/hostelService.js';
-import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddleware.js';
+import { authMiddleware, requireManager, AuthenticatedRequest } from '../middleware/authMiddleware.js';
 import { UpdateRoomPriceSchema, CreateRoomSchema } from '@hostel/shared';
 
 export const hostelRouter = Router();
-hostelRouter.use(authMiddleware);
+hostelRouter.use(authMiddleware, requireManager);
 
 hostelRouter.get('/', (req, res, next) => {
   try {
@@ -25,7 +25,7 @@ hostelRouter.get('/rooms', (req, res, next) => {
   }
 });
 
-hostelRouter.post('/rooms', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+hostelRouter.post('/rooms', authMiddleware, requireManager, (req: AuthenticatedRequest, res, next) => {
   try {
     const input = CreateRoomSchema.parse(req.body);
     const room = HostelService.createRoom({
@@ -41,7 +41,7 @@ hostelRouter.post('/rooms', authMiddleware, (req: AuthenticatedRequest, res, nex
   }
 });
 
-hostelRouter.patch('/rooms/:id/price', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+hostelRouter.patch('/rooms/:id/price', authMiddleware, requireManager, (req: AuthenticatedRequest, res, next) => {
   try {
     const input = UpdateRoomPriceSchema.parse(req.body);
     const room = HostelService.updateRoomPrice(req.params.id, input.price_per_student, req.admin?.id);

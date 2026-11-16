@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { BookingGroupService } from '../services/bookingGroupService.js';
 import { MatchingService } from '../services/matchingService.js';
-import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddleware.js';
+import { authMiddleware, requireManager, AuthenticatedRequest } from '../middleware/authMiddleware.js';
 
 export const bookingRouter = Router();
-bookingRouter.use(authMiddleware);
+bookingRouter.use(authMiddleware, requireManager);
 
 bookingRouter.get('/groups', (req, res, next) => {
   try {
@@ -41,12 +41,12 @@ bookingRouter.get('/matching-queue', (req, res, next) => {
   }
 });
 
-bookingRouter.post('/matching/run', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+bookingRouter.post('/matching/run', authMiddleware, requireManager, (req: AuthenticatedRequest, res, next) => {
   try { res.json(MatchingService.runMatching(req.body.hostel, req.body.capacity)); }
   catch (err) { next(err); }
 });
 
-bookingRouter.post('/groups/:id/complete-from-queue', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+bookingRouter.post('/groups/:id/complete-from-queue', authMiddleware, requireManager, (req: AuthenticatedRequest, res, next) => {
   try {
     if (!req.body.queue_item_id) throw new Error('A queue candidate is required.');
     MatchingService.completeKnownTripleGroup(req.params.id, req.body.queue_item_id);

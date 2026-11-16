@@ -1,16 +1,16 @@
 import express, { Router } from 'express';
-import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddleware.js';
+import { authMiddleware, requireManager, AuthenticatedRequest } from '../middleware/authMiddleware.js';
 import { StudentPhotoService } from '../services/studentPhotoService.js';
 import { PhotoDisplayConsentService } from '../services/photoDisplayConsentService.js';
 import { WhatsAppService } from '../services/whatsapp/whatsappService.js';
 
 export const studentPhotoRouter = Router();
 
-studentPhotoRouter.get('/photo-reviews', authMiddleware, (req, res, next) => {
+studentPhotoRouter.get('/photo-reviews', authMiddleware, requireManager, (req, res, next) => {
   try { res.json({ reviews: StudentPhotoService.getReviewQueue(String(req.query.status || 'PENDING_REVIEW')) }); } catch (err) { next(err); }
 });
 
-studentPhotoRouter.get('/photo-reviews/:studentId/image', authMiddleware, (req, res, next) => {
+studentPhotoRouter.get('/photo-reviews/:studentId/image', authMiddleware, requireManager, (req, res, next) => {
   try {
     const submissionId = typeof req.query.submission_id === 'string' ? req.query.submission_id : undefined;
     const photo = StudentPhotoService.getPhotoForManager(req.params.studentId, submissionId);
@@ -19,19 +19,19 @@ studentPhotoRouter.get('/photo-reviews/:studentId/image', authMiddleware, (req, 
   } catch (err) { next(err); }
 });
 
-studentPhotoRouter.get('/photo-reviews/:studentId/history', authMiddleware, (req, res, next) => {
+studentPhotoRouter.get('/photo-reviews/:studentId/history', authMiddleware, requireManager, (req, res, next) => {
   try { res.json({ history: StudentPhotoService.getReviewHistory(req.params.studentId) }); } catch (err) { next(err); }
 });
 
-studentPhotoRouter.post('/photo-reviews/:studentId/approve', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+studentPhotoRouter.post('/photo-reviews/:studentId/approve', authMiddleware, requireManager, (req: AuthenticatedRequest, res, next) => {
   try { res.json({ review: StudentPhotoService.reviewPhoto(req.params.studentId, 'APPROVED', req.admin!.id, undefined, req.body?.submission_id) }); } catch (err) { next(err); }
 });
 
-studentPhotoRouter.post('/photo-reviews/:studentId/reject', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+studentPhotoRouter.post('/photo-reviews/:studentId/reject', authMiddleware, requireManager, (req: AuthenticatedRequest, res, next) => {
   try { res.json({ review: StudentPhotoService.reviewPhoto(req.params.studentId, 'REJECTED', req.admin!.id, req.body?.reason, req.body?.submission_id) }); } catch (err) { next(err); }
 });
 
-studentPhotoRouter.post('/photo-reviews/:studentId/request-replacement', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
+studentPhotoRouter.post('/photo-reviews/:studentId/request-replacement', authMiddleware, requireManager, async (req: AuthenticatedRequest, res, next) => {
   try {
     if (WhatsAppService.getStatus().is_live) throw new Error('Replacement upload delivery is available only through the local WhatsApp simulator in this milestone.');
     const result = StudentPhotoService.authorizeReplacement(req.params.studentId, req.admin!.id);
@@ -40,7 +40,7 @@ studentPhotoRouter.post('/photo-reviews/:studentId/request-replacement', authMid
   } catch (err) { next(err); }
 });
 
-studentPhotoRouter.post('/students/:id/photo-upload-link', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
+studentPhotoRouter.post('/students/:id/photo-upload-link', authMiddleware, requireManager, async (req: AuthenticatedRequest, res, next) => {
   try {
     if (WhatsAppService.getStatus().is_live) throw new Error('Photo-upload link delivery is available only through the local WhatsApp simulator in this milestone.');
     const result = StudentPhotoService.issueUploadLink(req.params.id, req.admin!.id);
@@ -49,13 +49,13 @@ studentPhotoRouter.post('/students/:id/photo-upload-link', authMiddleware, async
   } catch (err) { next(err); }
 });
 
-studentPhotoRouter.get('/photo-display-consent/:studentId', authMiddleware, (req, res, next) => {
+studentPhotoRouter.get('/photo-display-consent/:studentId', authMiddleware, requireManager, (req, res, next) => {
   try {
     res.json({ consent: PhotoDisplayConsentService.getCurrentStatus(req.params.studentId), history: PhotoDisplayConsentService.getHistory(req.params.studentId) });
   } catch (err) { next(err); }
 });
 
-studentPhotoRouter.post('/photo-display-consent/:studentId/withdraw', authMiddleware, (req: AuthenticatedRequest, res, next) => {
+studentPhotoRouter.post('/photo-display-consent/:studentId/withdraw', authMiddleware, requireManager, (req: AuthenticatedRequest, res, next) => {
   try {
     res.json({ consent: PhotoDisplayConsentService.recordDecision({ studentId: req.params.studentId, decision: 'WITHDRAWN', decidedBy: 'MANAGER', adminId: req.admin!.id, notes: req.body?.reason || req.body?.notes }) });
   } catch (err) { next(err); }

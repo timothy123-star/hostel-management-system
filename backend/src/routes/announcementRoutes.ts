@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { AnnouncementService } from '../services/announcementService.js';
-import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddleware.js';
+import { authMiddleware, requireManager, AuthenticatedRequest } from '../middleware/authMiddleware.js';
 import { ComposeAnnouncementSchema } from '@hostel/shared';
 
 export const announcementRouter = Router();
-announcementRouter.use(authMiddleware);
+announcementRouter.use(authMiddleware, requireManager);
 
 announcementRouter.get('/', (req, res, next) => {
   try {
@@ -28,7 +28,7 @@ announcementRouter.get('/:id', (req, res, next) => {
   }
 });
 
-announcementRouter.post('/preview', authMiddleware, (req, res, next) => {
+announcementRouter.post('/preview', authMiddleware, requireManager, (req, res, next) => {
   try {
     const input = ComposeAnnouncementSchema.parse(req.body);
     const preview = AnnouncementService.previewAnnouncement(input);
@@ -38,7 +38,7 @@ announcementRouter.post('/preview', authMiddleware, (req, res, next) => {
   }
 });
 
-announcementRouter.post('/send', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
+announcementRouter.post('/send', authMiddleware, requireManager, async (req: AuthenticatedRequest, res, next) => {
   try {
     const input = ComposeAnnouncementSchema.parse(req.body);
     const announcement = await AnnouncementService.sendAnnouncement(input, req.admin?.id);
