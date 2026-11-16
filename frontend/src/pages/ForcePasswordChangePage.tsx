@@ -23,6 +23,16 @@ export const ForcePasswordChangePage: React.FC<{ onDone: (path: string) => void 
     try {
       await api.changePassword(currentPw, newPw, confirmPw);
       await refresh();
+      // A deep-linked resident verification interrupted by the mandatory
+      // password change resumes there instead of dropping to the scanner.
+      try {
+        const pendingScan = sessionStorage.getItem('hostel_pending_scan');
+        if (pendingScan) {
+          sessionStorage.removeItem('hostel_pending_scan');
+          onDone(`/resident-verification/${encodeURIComponent(pendingScan)}`);
+          return;
+        }
+      } catch { /* storage unavailable */ }
       onDone('/security/scan');
     } catch (err: any) {
       if (err?.details?.code === 'PASSWORD_CHANGE_REQUIRED' || err.status === 403) {

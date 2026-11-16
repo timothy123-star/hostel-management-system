@@ -14,10 +14,26 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<any | null>(() => {
-    const saved = localStorage.getItem('hostel_admin_user');
-    return saved ? JSON.parse(saved) : null;
+    try {
+      const saved = localStorage.getItem('hostel_admin_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      // Corrupt or unreadable cached identity must never blank the app:
+      // drop it and let the session re-validate against the server.
+      try {
+        localStorage.removeItem('hostel_admin_user');
+        localStorage.removeItem('hostel_admin_token');
+      } catch { /* storage unavailable */ }
+      return null;
+    }
   });
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('hostel_admin_token'));
+  const [token, setToken] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('hostel_admin_token');
+    } catch {
+      return null;
+    }
+  });
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {

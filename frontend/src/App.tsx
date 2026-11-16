@@ -22,6 +22,36 @@ import { SecurityScannerPage } from './pages/SecurityScannerPage.js';
 import { SecurityAccountsPage } from './pages/SecurityAccountsPage.js';
 import { ForcePasswordChangePage } from './pages/ForcePasswordChangePage.js';
 
+class RouteErrorBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch() {
+    this.setState({ failed: true });
+  }
+  render() {
+    if (this.state.failed) {
+      return (
+        <main className="mx-auto min-h-screen max-w-md bg-slate-50 p-6">
+          <section className="mt-12 rounded-3xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+            <p className="text-xs font-bold tracking-widest text-brand-600">HOSTELOS</p>
+            <h1 className="mt-3 text-2xl font-bold text-slate-900">Something went wrong</h1>
+            <p className="mt-2 text-sm text-slate-600">The page could not be displayed. Your verification link is preserved.</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+            >
+              Reload page
+            </button>
+          </section>
+        </main>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function DashboardRouter() {
   const { user, isLoading } = useAuth();
   const [currentPath, setCurrentPath] = useState<string>(() => {
@@ -61,8 +91,16 @@ function DashboardRouter() {
   const photoUploadMatch = currentPath.match(/^\/photo-upload\/([A-Za-z0-9_-]+)$/);
   if (photoUploadMatch) return <StudentPhotoUploadPage token={photoUploadMatch[1]} />;
 
-  const verificationMatch = currentPath.match(/^\/resident-verification\/([A-Za-z0-9_-]+)$/);
-  if (verificationMatch) return <ResidentVerificationPage token={verificationMatch[1]} />;
+  // Trailing slashes (added by some phone browsers/share sheets) must not
+  // drop a deep link to the dashboard default route below.
+  const verificationMatch = currentPath.match(/^\/resident-verification\/([A-Za-z0-9_-]+)\/?$/);
+  if (verificationMatch) {
+    return (
+      <RouteErrorBoundary key={verificationMatch[1]}>
+        <ResidentVerificationPage token={verificationMatch[1]} />
+      </RouteErrorBoundary>
+    );
+  }
 
   if (!user) {
     return <LoginPage onDone={navigate} />;

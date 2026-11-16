@@ -16,7 +16,8 @@ export const LoginPage: React.FC<{ onDone?: (path: string) => void }> = ({ onDon
     try {
       const user = await login({ username, password });
       if (user?.must_change_password === true) {
-        try { sessionStorage.removeItem('hostel_pending_scan'); } catch { /* private mode */ }
+        // Keep any pending resident-verification token: the forced password
+        // change screen consumes it and returns there afterwards.
         onDone?.('/security/change-password');
         return;
       }

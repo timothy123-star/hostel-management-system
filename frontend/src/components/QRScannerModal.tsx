@@ -22,9 +22,56 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   const [verificationResult, setVerificationResult] = useState<any | null>(null);
   const [scannerError, setScannerError] = useState<string | null>(null);
   const [photoSrc, setPhotoSrc] = useState<string | null>(null);
+  const [photoLoading, setPhotoLoading] = useState(false);
   const [scanSession, setScanSession] = useState(0);
+  const [cameras, setCameras] = useState<Array<{ id: string; label: string }>>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
+  const [cameraStarting, setCameraStarting] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const verifyingRef = useRef(false);
+  const selectedCameraRef = useRef<string | null>(null);
+
+// Labels are empty until the user grants camera permission; matching is
+// therefore best-effort. Known virtual/screen-share devices are deprioritized
+// on laptops because they can render a solid placeholder frame.
+const VIRTUAL_CAMERA_PATTERN = /virtual|obs|snap|manycam|screen|teams|zoom|vcam|droidcam|epoccam/i;
+const REAR_CAMERA_PATTERN = /back|rear|environment/i;
+
+function isCoarsePointer() {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    && window.matchMedia('(pointer: coarse)').matches;
+}
+
+function pickDefaultCamera(devices: Array<{ id: string; label: string }>, preferredId: string | null) {
+  if (preferredId && devices.some((d) => d.id === preferredId)) return preferredId;
+  if (isCoarsePointer()) {
+    const rear = devices.find((d) => REAR_CAMERA_PATTERN.test(d.label || ''));
+    return (rear ?? devices[0])?.id ?? null;
+  }
+  const physical = devices.find((d) => !VIRTUAL_CAMERA_PATTERN.test(d.label || ''));
+  return (physical ?? devices[0])?.id ?? null;
+}
+
+function cameraErrorMessage(err: any) {
+  const name = String(err?.name || '');
+  const detail = String(err?.message || err || '');
+  if (name === 'NotAllowedError' || /permission|denied|not allowed/i.test(detail)) {
+    return 'Camera permission was denied. Allow camera access for this site in the browser address bar, then reopen the scanner or use manual token entry.';
+  }
+  if (name === 'NotFoundError' || /not found|no camera|no video/i.test(detail)) {
+    return 'No camera device was found. Connect a camera, or enter the verification token manually below.';
+  }
+  if (name === 'NotReadableError' || /in use|busy|track|failed to allocate/i.test(detail)) {
+    return 'The camera is already in use by another app or browser tab. Close the other app or tab and try scanning again, or use manual token entry.';
+  }
+  if (name === 'OverconstrainedError' || /constraint/i.test(detail)) {
+    return 'The selected camera does not support the requested mode. Try another camera from the list, or use manual token entry.';
+  }
+  if (name === 'SecurityError' || /secure|https/i.test(detail)) {
+    return 'Camera access requires a secure (HTTPS) page. Open the dashboard over HTTPS, or use manual token entry.';
+  }
+  return 'Could not initialize camera scanner. You can enter the verification token manually below.';
+}
 
   // The approved photograph is served by an authenticated staff-only
   // endpoint, so it is fetched with the staff Bearer token (never rendered
@@ -34,10 +81,22 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
     let objectUrl: string | null = null;
     setPhotoSrc(null);
     const remoteUrl: string | undefined = verificationResult?.student?.photo_url;
-    if (!remoteUrl) return;
+    if (!remoteUrl) {
+      setPhotoLoading(false);
+      return;
+    }
+    setPhotoLoading(true);
     api.fetchStaffPhoto(remoteUrl)
-      .then((url) => { if (!cancelled) { objectUrl = url; setPhotoSrc(url); } else { URL.revokeObjectURL(url); } })
-      .catch(() => { if (!cancelled) setPhotoSrc(null); });
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        objectUrl = url;
+        setPhotoSrc(url);
+      })
+      .catch(() => { if (!cancelled) setPhotoSrc(null); })
+      .finally(() => { if (!cancelled) setPhotoLoading(false); });
     return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [verificationResult]);
 
@@ -79,6 +138,8 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
     if (!isOpen || activeTab !== 'camera' || verificationResult) return;
     let cancelled = false;
     let instance: Html5Qrcode | null = null;
+    setCameraStarting(true);
+    setScannerError(null);
     const timer = setTimeout(async () => {
       if (cancelled) return;
       try {
@@ -92,26 +153,79 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
         }
         if (cancelled) return;
         if (!document.getElementById('qr-reader-container')) return;
+        // Enumerate real devices instead of blindly forcing an environment
+        // (rear) camera: laptops usually have no rear camera, and a
+        // facingMode guess can resolve to a virtual device that renders a
+        // solid placeholder frame instead of a live preview.
+        let devices: Array<{ id: string; label: string }> = [];
+        try {
+          devices = await Html5Qrcode.getCameras();
+        } catch {
+          throw { name: 'NotFoundError', message: 'Camera enumeration failed.' };
+        }
+        if (cancelled) return;
+        if (!devices.length) {
+          throw { name: 'NotFoundError', message: 'No camera devices found.' };
+        }
+        if (!cancelled) setCameras(devices);
+        const chosenId = pickDefaultCamera(devices, selectedCameraRef.current);
+        if (chosenId !== selectedCameraRef.current) {
+          selectedCameraRef.current = chosenId;
+          if (!cancelled) setSelectedCameraId(chosenId);
+        }
+        if (cancelled) return;
+        if (!chosenId) {
+          throw { name: 'NotFoundError', message: 'No camera devices found.' };
+        }
         const qr = new Html5Qrcode('qr-reader-container', { verbose: false } as any);
         instance = qr;
         scannerRef.current = qr;
-        await qr.start(
-          { facingMode: 'environment' },
-          { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 },
-          (decodedText) => {
-            void handleVerifyToken(decodedText, 'CAMERA');
-          },
-          () => {
-            // Ignore ongoing frame scanning errors
-          }
-        );
+        const config = { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 };
+        const onScanSuccess = (decodedText: string) => {
+          void handleVerifyToken(decodedText, 'CAMERA');
+        };
+        const onScanFailure = () => {
+          // Ignore ongoing frame scanning errors
+        };
+        try {
+          // A concrete deviceId is the most reliable constraint on
+          // laptops/desktops with one or more physical cameras.
+          await qr.start(chosenId, config, onScanSuccess, onScanFailure);
+        } catch (deviceErr: any) {
+          const name = String(deviceErr?.name || '');
+          // Permission failures will fail the same way on retry: surface
+          // them immediately instead of masking them behind a fallback.
+          if (name === 'NotAllowedError' || name === 'SecurityError') throw deviceErr;
+          // Otherwise fall back to a facing-mode request (rear on phones,
+          // front on laptops/desktops).
+          await qr.start({ facingMode: isCoarsePointer() ? 'environment' : 'user' }, config, onScanSuccess, onScanFailure);
+        }
+        // Prove the video element actually carries a live stream: a styled
+        // container background alone is not proof the camera is working.
+        const video = document.querySelector('#qr-reader-container video') as HTMLVideoElement | null;
+        const tracks = (video?.srcObject as MediaStream | null)?.getVideoTracks?.() ?? [];
+        if (!video || tracks.length === 0 || (tracks[0] as MediaStreamTrack).readyState === 'ended') {
+          throw { name: 'NotReadableError', message: 'The camera produced no video track.' };
+        }
+        try { await video.play(); } catch { /* autoplay is managed by the library */ }
         if (cancelled) {
           scannerRef.current = null;
           try { await qr.stop(); } catch { /* already stopped */ }
           try { qr.clear(); } catch { /* already cleared */ }
         }
       } catch (err: any) {
-        if (!cancelled) setScannerError('Could not initialize camera scanner. You can enter the verification token manually below.');
+        if (!cancelled) {
+          const inst = instance ?? scannerRef.current;
+          scannerRef.current = null;
+          instance = null;
+          if (inst) {
+            try { await inst.stop(); } catch { /* already stopped */ }
+            try { inst.clear(); } catch { /* already cleared */ }
+          }
+          setScannerError(cameraErrorMessage(err));
+        }
+      } finally {
+        if (!cancelled) setCameraStarting(false);
       }
     }, 300);
 
@@ -126,8 +240,17 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
         });
       }
       verifyingRef.current = false;
+      setCameraStarting(false);
     };
   }, [isOpen, activeTab, verificationResult, scanSession, handleVerifyToken]);
+
+  const handleCameraChange = useCallback((deviceId: string) => {
+    selectedCameraRef.current = deviceId;
+    setSelectedCameraId(deviceId);
+    // Bump the session so the effect stops the current stream and starts
+    // exactly one preview instance on the newly selected device.
+    setScanSession((s) => s + 1);
+  }, []);
 
   const handleReset = useCallback(() => {
     const inst = scannerRef.current;
@@ -141,6 +264,8 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
     setIsVerifying(false);
     setVerificationResult(null);
     setPhotoSrc(null);
+    setPhotoLoading(false);
+    setCameraStarting(false);
     setManualToken('');
     setScannerError(null);
     setActiveTab('camera');
@@ -209,16 +334,24 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
             {verificationResult.student && (
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
                 <div className="flex flex-col items-center text-center">
-                  <img
-                    src={photoSrc || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(verificationResult.student.full_name)}`}
-                    alt={photoSrc ? `Approved photograph of ${verificationResult.student.full_name} for identity comparison` : `Identity placeholder for ${verificationResult.student.full_name}`}
-                    className="w-44 h-44 rounded-2xl bg-white border-2 border-emerald-500 object-cover shadow-sm"
-                  />
-                  <p className="mt-2 text-xs font-medium text-emerald-800">
-                    {photoSrc
-                      ? 'Approved photograph — compare with the person present.'
-                      : 'No approved photograph on file — verify name, facility, room and dates with management.'}
-                  </p>
+                  {photoLoading ? (
+                    <div className="flex w-44 h-44 items-center justify-center rounded-2xl bg-slate-100 border border-slate-200">
+                      <p className="px-3 text-center text-xs text-slate-500">Loading approved photograph…</p>
+                    </div>
+                  ) : (
+                    <>
+                      <img
+                        src={photoSrc || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(verificationResult.student.full_name)}`}
+                        alt={photoSrc ? `Approved photograph of ${verificationResult.student.full_name} for identity comparison` : `Identity placeholder for ${verificationResult.student.full_name}`}
+                        className="w-44 h-44 rounded-2xl bg-white border-2 border-emerald-500 object-cover shadow-sm"
+                      />
+                      <p className="mt-2 text-xs font-medium text-emerald-800">
+                        {photoSrc
+                          ? 'Approved photograph — compare with the person present.'
+                          : 'No approved photograph on file — verify name, facility, room and dates with management.'}
+                      </p>
+                    </>
+                  )}
                 </div>
                 <div className="mt-3 flex-1 text-sm space-y-1">
                   <p className="font-semibold text-base text-slate-900">
@@ -291,8 +424,29 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
             {/* Camera View */}
             {activeTab === 'camera' && (
               <div className="space-y-3">
+                {cameras.length > 1 && (
+                  <label className="block text-xs font-semibold text-slate-600">
+                    Camera
+                    <select
+                      value={selectedCameraId ?? ''}
+                      onChange={(e) => handleCameraChange(e.target.value)}
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    >
+                      {cameras.map((c, i) => (
+                        <option key={c.id} value={c.id}>
+                          {c.label || `Camera ${i + 1}`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <div className="manager-qr-viewport relative w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-900">
                   <div id="qr-reader-container" className="manager-qr-reader" />
+                  {cameraStarting && !scannerError && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-slate-900/70">
+                      <p className="text-xs font-medium text-slate-200">Starting camera…</p>
+                    </div>
+                  )}
                 </div>
                 <p className="text-xs text-slate-500 text-center">
                   Point the camera at the student's digital WhatsApp identity QR code.

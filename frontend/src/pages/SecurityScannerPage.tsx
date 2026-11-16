@@ -20,6 +20,7 @@ export const SecurityScannerPage: React.FC = () => {
   const [isVerifying, setIsVerifying] = useState(false);
   const [result, setResult] = useState<any | null>(null);
   const [photoSrc, setPhotoSrc] = useState<string | null>(null);
+  const [photoLoading, setPhotoLoading] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [currentPw, setCurrentPw] = useState('');
@@ -28,15 +29,31 @@ export const SecurityScannerPage: React.FC = () => {
   const [pwMsg, setPwMsg] = useState<string | null>(null);
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
+  // The approved photograph loads asynchronously after identity verification.
+  // While it is in flight a neutral loading indicator is shown; the amber
+  // withheld/unavailable notice only renders once the fetch has settled, so
+  // a transient warning never flashes before the final resident details.
   useEffect(() => {
     let cancelled = false;
     let objectUrl: string | null = null;
     setPhotoSrc(null);
     const remoteUrl: string | undefined = result?.student?.photo_url;
-    if (!remoteUrl) return;
+    if (!remoteUrl) {
+      setPhotoLoading(false);
+      return;
+    }
+    setPhotoLoading(true);
     api.fetchStaffPhoto(remoteUrl)
-      .then((url) => { if (!cancelled) { objectUrl = url; setPhotoSrc(url); } else { URL.revokeObjectURL(url); } })
-      .catch(() => { if (!cancelled) setPhotoSrc(null); });
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        objectUrl = url;
+        setPhotoSrc(url);
+      })
+      .catch(() => { if (!cancelled) setPhotoSrc(null); })
+      .finally(() => { if (!cancelled) setPhotoLoading(false); });
     return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [result]);
 
@@ -268,7 +285,11 @@ export const SecurityScannerPage: React.FC = () => {
 
             {status === 'VALID_RESIDENT' && (
               <div className="rounded-2xl bg-slate-900 border border-slate-800 p-4 space-y-3">
-                {photoSrc ? (
+                {photoLoading ? (
+                  <div className="mx-auto flex h-52 w-52 items-center justify-center rounded-2xl border border-slate-700 bg-slate-800">
+                    <p className="px-4 text-center text-xs text-slate-300">Loading approved photograph…</p>
+                  </div>
+                ) : photoSrc ? (
                   <img src={photoSrc} alt="Approved resident photograph" className="mx-auto h-52 w-52 rounded-2xl object-cover border-2 border-emerald-500" />
                 ) : (
                   <p className="text-center text-xs text-amber-200 bg-amber-500/10 border border-amber-500/40 rounded-xl p-3">

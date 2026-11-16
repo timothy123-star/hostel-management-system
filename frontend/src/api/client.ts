@@ -33,6 +33,12 @@ export async function apiRequest<T = any>(
   if (response.status === 401) {
     localStorage.removeItem('hostel_admin_token');
     localStorage.removeItem('hostel_admin_user');
+    // An expired session must not silently discard a deep-linked resident
+    // verification URL: remember the token so sign-in can return to it.
+    try {
+      const pending = window.location.pathname.match(/^\/resident-verification\/([A-Za-z0-9_-]+)\/?$/);
+      if (pending) sessionStorage.setItem('hostel_pending_scan', pending[1]);
+    } catch { /* storage unavailable (private mode): login simply lands on role home */ }
     if (!window.location.pathname.includes('/login')) {
       window.location.href = '/login';
     }

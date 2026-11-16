@@ -16,7 +16,11 @@ describe('manager QR scanner modal (camera + result handling)', () => {
     expect(src).toContain('Html5Qrcode');
     expect(src).not.toContain('Html5QrcodeScanner');
     expect(src).toContain("new Html5Qrcode('qr-reader-container'");
-    expect(src).toContain("facingMode: 'environment'");
+    // A concrete enumerated device is the primary constraint (laptops have
+    // no rear camera); facingMode survives only as a phone/desktop fallback.
+    expect(src).toContain('Html5Qrcode.getCameras()');
+    expect(src).toMatch(/await qr\.start\(chosenId,/);
+    expect(src).toContain('facingMode');
     expect(src).toContain('fps: 10');
     expect(src).toContain('qrbox: { width: 250, height: 250 }');
     expect(src).toContain("document.getElementById('qr-reader-container')");
