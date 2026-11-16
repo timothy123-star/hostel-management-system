@@ -4,11 +4,48 @@ import { Modal } from './Modal.js';
 import { api } from '../api/client.js';
 import { Camera, Keyboard, CheckCircle2, XCircle, AlertTriangle, RefreshCw } from 'lucide-react';
 import { StatusBadge } from './StatusBadge.js';
+import { extractQrToken } from '@hostel/shared';
 
 interface QRScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
   onVerificationComplete?: () => void;
+}
+
+const VERIFY_TIMEOUT_MS = 20000;
+
+const INVALID_QR_MESSAGE =
+  'This QR code is not a HostelOS resident pass. Scan a valid resident QR or enter the token manually.';
+
+/** Local error boundary: a render failure inside the scanner must show a
+ * retry state, never a blank result or a white page. */
+class ScannerErrorBoundary extends React.Component<
+  { onReset: () => void; children: React.ReactNode },
+  { error: string | null }
+> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(err: unknown) {
+    return { error: err instanceof Error ? err.message : 'The scanner view failed to render.' };
+  }
+  componentDidCatch() { /* surfaced in the retry state below */ }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="space-y-4">
+          <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-sm">
+            The scanner view ran into a problem. No result was lost — try scanning again.
+          </div>
+          <button
+            onClick={() => { this.setState({ error: null }); this.props.onReset(); }}
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-slate-900 text-white rounded-xl font-medium hover:bg-slate-800 transition"
+          >
+            <RefreshCw className="w-4 h-4" /> Scan Another Digital Pass
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 export const QRScannerModal: React.FC<QRScannerModalProps> = ({
@@ -29,6 +66,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   const [cameraStarting, setCameraStarting] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const verifyingRef = useRef(false);
+  const [lastAttempt, setLastAttempt] = useState<{ token: string; method: 'CAMERA' | 'MANUAL_ENTRY' } | null>(null);
   const selectedCameraRef = useRef<string | null>(null);
 
 // Labels are empty until the user grants camera permission; matching is
@@ -105,9 +143,25 @@ function cameraErrorMessage(err: any) {
     // Single-flight guard: repeated camera callbacks must not launch
     // overlapping verification requests.
     if (!clean || verifyingRef.current) return;
+    // Issued QR codes encode the full resident-verification URL while the
+    // verification API expects only the opaque token. Camera decodes must
+    // therefore resolve to a token first; anything else is a visible
+    // INVALID result, never a blank state, and the dashboard never
+    // navigates to a URL taken from an untrusted QR payload. Manual entry
+    // keeps accepting a pasted raw token or URL and falls back to sending
+    // the trimmed input so legacy/demo values still reach the server,
+    // which remains the authority on credential validity.
+    const extracted = extractQrToken(clean);
+    const credential = method === 'CAMERA' ? extracted : (extracted ?? clean);
+    if (!credential) {
+      setVerificationResult({ outcome: 'DENIED', status: 'INVALID_CREDENTIAL', reason: INVALID_QR_MESSAGE });
+      if (onVerificationComplete) onVerificationComplete();
+      return;
+    }
     verifyingRef.current = true;
     setIsVerifying(true);
     setScannerError(null);
+    setLastAttempt({ token: credential, method });
     if (method === 'CAMERA') {
       // Freeze the preview immediately so further frames cannot re-fire
       // while the authenticated verification request is in flight.
@@ -119,11 +173,20 @@ function cameraErrorMessage(err: any) {
       }
     }
     try {
-      const result = await api.verifyQR(clean, method);
+      // Bound the request: without a timeout a stalled network leaves the
+      // cleared camera viewport on a blank state with no way to retry.
+      const result = await Promise.race([
+        api.verifyQR(credential, method),
+        new Promise((_, reject) => setTimeout(
+          () => reject(new Error('Verification timed out. Check your connection and retry the scan.')),
+          VERIFY_TIMEOUT_MS
+        ))
+      ]) as any;
       setVerificationResult(result);
+      setLastAttempt(null);
       if (onVerificationComplete) onVerificationComplete();
     } catch (err: any) {
-      setScannerError(err.message || 'Verification failed');
+      setScannerError(err.message || 'Verification failed. Check your connection and retry the scan.');
       verifyingRef.current = false;
       // Restart the preview so a failed camera scan can be retried
       // without reopening the dashboard.
@@ -262,6 +325,7 @@ function cameraErrorMessage(err: any) {
     }
     verifyingRef.current = false;
     setIsVerifying(false);
+    setLastAttempt(null);
     setVerificationResult(null);
     setPhotoSrc(null);
     setPhotoLoading(false);
@@ -294,6 +358,7 @@ function cameraErrorMessage(err: any) {
       title="Hostel Gate Security & Digital QR Scanner"
       maxWidth="lg"
     >
+      <ScannerErrorBoundary onReset={handleReset}>
       <div className="space-y-4">
         {/* Verification Result Display */}
         {verificationResult ? (
@@ -415,9 +480,20 @@ function cameraErrorMessage(err: any) {
             </div>
 
             {scannerError && (
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>{scannerError}</span>
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>{scannerError}</span>
+                </div>
+                {lastAttempt && !isVerifying && (
+                  <button
+                    type="button"
+                    onClick={() => void handleVerifyToken(lastAttempt.token, lastAttempt.method)}
+                    className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-100 px-3 py-1.5 font-semibold text-amber-900 hover:bg-amber-200 transition"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Retry verification
+                  </button>
+                )}
               </div>
             )}
 
@@ -445,6 +521,11 @@ function cameraErrorMessage(err: any) {
                   {cameraStarting && !scannerError && (
                     <div className="absolute inset-0 flex items-center justify-center bg-slate-900/70">
                       <p className="text-xs font-medium text-slate-200">Starting camera…</p>
+                    </div>
+                  )}
+                  {isVerifying && !verificationResult && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-slate-900/70">
+                      <p className="text-xs font-medium text-slate-200">Verifying digital pass…</p>
                     </div>
                   )}
                 </div>
@@ -492,6 +573,7 @@ function cameraErrorMessage(err: any) {
           </>
         )}
       </div>
+      </ScannerErrorBoundary>
     </Modal>
   );
 };
