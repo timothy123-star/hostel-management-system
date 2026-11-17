@@ -1,10 +1,60 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeScannerState } from 'html5-qrcode';
 import { Modal } from './Modal.js';
 import { api } from '../api/client.js';
 import { Camera, Keyboard, CheckCircle2, XCircle, AlertTriangle, RefreshCw } from 'lucide-react';
 import { StatusBadge } from './StatusBadge.js';
 import { extractQrToken } from '@hostel/shared';
+
+// Instances with a stop already in flight must never receive a second
+// concurrent stop: the library guards on internal state, not on re-entry.
+const stoppingInstances = new WeakSet<object>();
+
+/**
+ * Lifecycle-safe stop for the manager camera scanner.
+ *
+ * `Html5Qrcode.stop()` throws synchronously (no Promise is returned) when
+ * the scanner is already NOT_STARTED, so `.catch()` alone cannot contain
+ * it. This operation reads the public scanner state first, skips idle
+ * instances, serializes concurrent stops on the same instance, and still
+ * contains both synchronous throws and asynchronous rejections. It never
+ * hides unrelated errors: only the stop/clear teardown of a known scanner
+ * instance is contained, and the desired end state (camera down, element
+ * cleared, reference released by the caller) is always reached.
+ */
+export async function stopManagerScannerInstance(
+  inst: Html5Qrcode | null | undefined
+): Promise<void> {
+  if (!inst || stoppingInstances.has(inst)) return;
+  let state: unknown;
+  try {
+    state = inst.getState();
+  } catch {
+    // Unreadable state: never force a stop on an unknown scanner.
+    return;
+  }
+  if (
+    state !== Html5QrcodeScannerState.SCANNING &&
+    state !== Html5QrcodeScannerState.PAUSED
+  ) {
+    return;
+  }
+  stoppingInstances.add(inst);
+  try {
+    try {
+      await inst.stop();
+    } catch {
+      // Already stopped or stopping: the camera is down either way.
+    }
+    try {
+      inst.clear();
+    } catch {
+      // Video element already cleared.
+    }
+  } finally {
+    stoppingInstances.delete(inst);
+  }
+}
 
 interface QRScannerModalProps {
   isOpen: boolean;
@@ -72,6 +122,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
 // Labels are empty until the user grants camera permission; matching is
 // therefore best-effort. Known virtual/screen-share devices are deprioritized
 // on laptops because they can render a solid placeholder frame.
+
 const VIRTUAL_CAMERA_PATTERN = /virtual|obs|snap|manycam|screen|teams|zoom|vcam|droidcam|epoccam/i;
 const REAR_CAMERA_PATTERN = /back|rear|environment/i;
 
@@ -167,10 +218,7 @@ function cameraErrorMessage(err: any) {
       // while the authenticated verification request is in flight.
       const inst = scannerRef.current;
       scannerRef.current = null;
-      if (inst) {
-        try { await inst.stop(); } catch { /* already stopped */ }
-        try { inst.clear(); } catch { /* already cleared */ }
-      }
+      await stopManagerScannerInstance(inst);
     }
     try {
       // Bound the request: without a timeout a stalled network leaves the
@@ -297,11 +345,8 @@ function cameraErrorMessage(err: any) {
       clearTimeout(timer);
       const inst = instance ?? scannerRef.current;
       scannerRef.current = null;
-      if (inst) {
-        inst.stop().catch(() => {}).finally(() => {
-          try { inst.clear(); } catch { /* already cleared */ }
-        });
-      }
+      instance = null;
+      void stopManagerScannerInstance(inst);
       verifyingRef.current = false;
       setCameraStarting(false);
     };
@@ -318,11 +363,7 @@ function cameraErrorMessage(err: any) {
   const handleReset = useCallback(() => {
     const inst = scannerRef.current;
     scannerRef.current = null;
-    if (inst) {
-      inst.stop().catch(() => {}).finally(() => {
-        try { inst.clear(); } catch { /* already cleared */ }
-      });
-    }
+    void stopManagerScannerInstance(inst);
     verifyingRef.current = false;
     setIsVerifying(false);
     setLastAttempt(null);

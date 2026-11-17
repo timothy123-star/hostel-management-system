@@ -14,7 +14,7 @@ describe('manager QR scanner modal (camera + result handling)', () => {
   it('initializes the camera with an explicit environment-facing Html5Qrcode instance', () => {
     const src = modal();
     expect(src).toContain('Html5Qrcode');
-    expect(src).not.toContain('Html5QrcodeScanner');
+    expect(src).not.toContain('new Html5QrcodeScanner(');
     expect(src).toContain("new Html5Qrcode('qr-reader-container'");
     // A concrete enumerated device is the primary constraint (laptops have
     // no rear camera); facingMode survives only as a phone/desktop fallback.
