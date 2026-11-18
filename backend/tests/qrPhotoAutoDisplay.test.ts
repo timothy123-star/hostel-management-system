@@ -56,6 +56,7 @@ describe('QR photo auto-display on upload permission', () => {
   });
 
   it('WhatsApp upload automatically grants display permission', () => {
+    ConversationHandler.recordPhotoDisclosure(residentPhone, studentId);
     StudentPhotoService.submitWhatsAppPhoto(studentId, jpeg, {
       messageId: 'wamid.auto-permission-1',
       phoneNumber: residentPhone,

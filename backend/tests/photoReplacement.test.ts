@@ -4,6 +4,7 @@ import { runSeed } from '../src/db/seed.js';
 import { getDb } from '../src/db/connection.js';
 import { config } from '../src/config.js';
 import { QRService } from '../src/services/qrService.js';
+import { ConversationHandler } from '../src/services/whatsapp/conversationHandler.js';
 import { StudentPhotoService } from '../src/services/studentPhotoService.js';
 import { PHOTO_UPLOAD_DISCLOSURE_VERSION, PhotoDisplayConsentService } from '../src/services/photoDisplayConsentService.js';
 
@@ -134,6 +135,7 @@ describe('replacement photograph continuity', () => {
   });
 
   it('WhatsApp uploads follow the same replacement rule', () => {
+    ConversationHandler.recordPhotoDisclosure('+x', studentId);
     StudentPhotoService.submitWhatsAppPhoto(studentId, jpeg, { messageId: 'w1', phoneNumber: '+x' }, { disclosureVersion: PHOTO_UPLOAD_DISCLOSURE_VERSION });
     StudentPhotoService.reviewPhoto(studentId, 'APPROVED', adminId);
     const active = pointer();

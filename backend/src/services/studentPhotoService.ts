@@ -123,11 +123,21 @@ export class StudentPhotoService {
     if (body.length > MAX_IMAGE_BYTES) throw new Error('The photograph must be 5 MB or smaller.');
     const type = imageType(body);
     if (!type) throw new Error('Please send a JPEG, PNG, or WebP photograph.');
-    // Structural guard: permission is only recorded for uploads that followed
-    // the pre-upload disclosure. The WhatsApp handler records the disclosure
-    // before invoking this path; direct calls without it are rejected.
-    if (options?.disclosureVersion !== PHOTO_UPLOAD_DISCLOSURE_VERSION) {
-      throw new Error('Photo-display disclosure must be shown before a WhatsApp photograph can be accepted. Please resend the photograph after the disclosure.');
+    // Service-boundary consent enforcement: a caller-supplied version
+    // constant is never sufficient. A current disclosure must exist in the
+    // database for this exact student and normalized sender phone, recorded
+    // before this submission. Anything else fails closed with no image
+    // stored and no consent created.
+    void options?.disclosureVersion;
+    {
+      const db = getDb();
+      const now = new Date().toISOString();
+      const disclosure = db.prepare(
+        'SELECT disclosure_version, shown_at FROM whatsapp_photo_disclosures WHERE phone_number = ? AND student_id = ?'
+      ).get(source.phoneNumber, studentId) as any;
+      if (!disclosure || disclosure.disclosure_version !== PHOTO_UPLOAD_DISCLOSURE_VERSION || !disclosure.shown_at || String(disclosure.shown_at) > now) {
+        throw new Error('Photo-display disclosure must be shown before a WhatsApp photograph can be accepted. Please resend the photograph after the disclosure.');
+      }
     }
 
     const db = getDb();
@@ -239,10 +249,15 @@ export class StudentPhotoService {
         // Atomic activation: from this commit, scans serve the replacement.
         // The single source of truth stays students.photo_storage_key, so
         // concurrent approvals can never leave two active photographs.
-        db.prepare('UPDATE students SET photo_storage_key = ?, updated_at = ? WHERE id = ?').run(target.storage_key, now, studentId);
+        db.prepare('UPDATE students SET photo_storage_key = ?, photo_status = ?, updated_at = ? WHERE id = ?').run(target.storage_key, 'APPROVED', now, studentId);
+      } else if (decision === 'APPROVED') {
+        // Initial approval whose pointer was set at upload: the pointer is
+        // already correct, but the denormalized status must be synchronized
+        // so it stops reporting PENDING_REVIEW for an approved photograph.
+        db.prepare("UPDATE students SET photo_status = 'APPROVED', updated_at = ? WHERE id = ?").run(now, studentId);
       } else {
-        // Rejections (and initial-pending approvals, whose pointer was set at
-        // upload) never move the pointer. Keep the legacy current-photo field
+        // Rejections never move the pointer, so an older approved active
+        // photograph stays live. Keep the legacy current-photo field
         // untouched for old SQLite databases whose CHECK predates new states.
         db.prepare('UPDATE students SET updated_at = ? WHERE id = ?').run(now, studentId);
       }

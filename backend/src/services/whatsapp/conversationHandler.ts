@@ -888,10 +888,21 @@ export class ConversationHandler {
    */
   static hasPhotoDisclosure(phone: string, studentId: string): boolean {
     try {
+      // Identity-bound gate: a disclosure authorizes photographs only for the
+      // exact student it was recorded for. A phone-only match (e.g. a stale
+      // record left by a previous resident after number reuse) must never
+      // authorize a different student. Fail closed on any mismatch or on a
+      // record timestamped after the check moment.
+      if (!studentId) return false;
       const row = getDb().prepare(
-        'SELECT disclosure_version FROM whatsapp_photo_disclosures WHERE phone_number = ?'
+        'SELECT disclosure_version, student_id, shown_at FROM whatsapp_photo_disclosures WHERE phone_number = ?'
       ).get(phone) as any;
-      return !!row && row.disclosure_version === PHOTO_UPLOAD_DISCLOSURE_VERSION && !!studentId;
+      if (!row) return false;
+      if (row.student_id !== studentId) return false;
+      if (row.disclosure_version !== PHOTO_UPLOAD_DISCLOSURE_VERSION) return false;
+      if (!row.shown_at) return false;
+      if (String(row.shown_at) > new Date().toISOString()) return false;
+      return true;
     } catch {
       return false;
     }
@@ -918,8 +929,11 @@ export class ConversationHandler {
     }
     const { PHOTO_UPLOAD_DISCLOSURE_VERSION, PHOTO_WHATSAPP_DISCLOSURE_TEXT } = await import('../photoDisplayConsentService.js');
     if (!this.hasPhotoDisclosure(phone, match.studentId)) {
-      this.recordPhotoDisclosure(phone, match.studentId);
+      // Deliver first, record only on successful delivery: a failed send
+      // must never leave a record that authorizes a photograph the resident
+      // never saw the disclosure for.
       await provider.sendTextMessage(phone, `${PHOTO_WHATSAPP_DISCLOSURE_TEXT}\n\nYour photograph was not saved yet. Please resend it now to confirm, and it will be reviewed by hostel management.`);
+      this.recordPhotoDisclosure(phone, match.studentId);
       return;
     }
     try {
