@@ -69,8 +69,8 @@ export class BookingGroupService {
 
     db.transaction(() => {
       db.prepare(`
-        INSERT INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, auto_complete_triple_consent, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, auto_complete_triple_consent, billing_currency, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'USD', ?, ?)
       `).run(groupId, groupCode, hostel.id, params.targetCapacity, initialStatus, params.studentId, eligibleAt, params.autoCompleteTripleConsent ? 1 : 0, now, now);
 
       const memberId = `bgm-${crypto.randomUUID()}`;

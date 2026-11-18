@@ -5,6 +5,8 @@ import { StudentService } from '../studentService.js';
 import { BookingGroupService } from '../bookingGroupService.js';
 import { QRService } from '../qrService.js';
 import { PaymentService } from '../paymentService.js';
+import { getActiveAttempt, initiateAttempt, monnifyStatus } from '../monnify/monnifyPayments.js';
+import { formatNgn } from '../monnify/pricing.js';
 import {
   WhatsAppState,
   RoomCapacity,
@@ -388,8 +390,42 @@ export class ConversationHandler {
     const provider = WhatsAppService.getProvider();
     try {
       const { payment, bank, demoWarning } = PaymentService.getStudentInstructions(phone);
-      await provider.sendQuickReplyButtons(phone, `💳 *INDIVIDUAL ACCOMMODATION PAYMENT INSTRUCTIONS*\n\nStudent: *${payment.full_name}*\nFacility: *${payment.hostel_name}*\nTemporary Room Hold: *${payment.room_number}* (${payment.capacity}-person)\nAmount: *$${payment.amount} ${payment.currency} (DEMO price)*\nPayment Reference: *${payment.reference_code}*\nStatus: *${payment.reconciliation_status || payment.status}*\n\nBank: *${bank.name}*\nAccount Name: *${bank.accountName}*\nAccount Number: *${bank.accountNumber}*\n\n⚠️ *${demoWarning}*`, [{ id: 'btn_simulate_bank_transfer', title: 'SIMULATE BANK TRANSFER' }]);
-    } catch (err: any) { await provider.sendTextMessage(phone, `⚠️ ${err.message}`); }
+      if (payment.currency === 'NGN') {
+        await this.handleMonnifyInstructions(phone, payment, provider);
+        return;
+      }
+      await provider.sendQuickReplyButtons(phone, `\uD83D\uDCB3 *INDIVIDUAL ACCOMMODATION PAYMENT INSTRUCTIONS*\n\nStudent: *${payment.full_name}*\nFacility: *${payment.hostel_name}*\nTemporary Room Hold: *${payment.room_number}* (${payment.capacity}-person)\nAmount: *$${payment.amount} ${payment.currency} (DEMO price)*\nPayment Reference: *${payment.reference_code}*\nStatus: *${payment.reconciliation_status || payment.status}*\n\nBank: *${bank.name}*\nAccount Name: *${bank.accountName}*\nAccount Number: *${bank.accountNumber}*\n\n\u26A0\uFE0F *${demoWarning}*`, [{ id: 'btn_simulate_bank_transfer', title: 'SIMULATE BANK TRANSFER' }]);
+    } catch (err: any) { await provider.sendTextMessage(phone, `\u26A0\uFE0F ${err.message}`); }
+  }
+
+  /**
+   * Official NGN transfer instructions over the existing WhatsApp flow.
+   * The sender phone number is the resident identity: instructions are only
+   * ever prepared for that sender's own outstanding obligation. Amounts come
+   * from the HostelOS ledger, never from the chat message.
+   *
+   * Template note: no approved Meta template exists for payment instructions
+   * yet. If one is approved, use name `hostelos_payment_instructions`
+   * (category UTILITY, params: full name, formatted amount, bank name,
+   * account number, account name, expiry, payment reference). Until then the
+   * in-session text message below is the supported path.
+   */
+  static async handleMonnifyInstructions(phone: string, payment: any, provider: any) {
+    try {
+      if (payment.status !== 'PENDING') {
+        await provider.sendTextMessage(phone, `\uD83D\uDCB3 *PAYMENT STATUS*\n\nObligation *${payment.reference_code}* is *${payment.status}*. No new transfer is needed.`);
+        return;
+      }
+      if (!monnifyStatus().enabled) {
+        await provider.sendTextMessage(phone, `\uD83D\uDCB3 *ACCOMMODATION FEE*\n\nStudent: *${payment.full_name}*\nAmount due: *${formatNgn(payment.amount_kobo)}*\nPayment Reference: *${payment.reference_code}*\n\nOnline transfer collection is currently disabled. Please contact the hostel manager for guidance.`);
+        return;
+      }
+      let attempt = getActiveAttempt(payment.id);
+      if (!attempt) attempt = await initiateAttempt({ paymentId: payment.id });
+      await provider.sendTextMessage(phone, `\uD83D\uDCB3 *OFFICIAL ACCOMMODATION TRANSFER*\n\nStudent: *${payment.full_name}*\nAmount: *${formatNgn(attempt.amount_kobo)}*\nBank: *${attempt.bank_name || 'Monnify partner bank'}*\nAccount Number: *${attempt.account_number || 'pending'}*\nAccount Name: *${attempt.account_name || 'Monnify virtual account'}*\nExpires: *${attempt.account_expires_at || 'soon'}*\nPayment Reference: *${attempt.merchant_reference}*\n\nTransfer the exact amount from any Nigerian bank app. Your payment stays PENDING until the manager explicitly approves it after verification.`);
+    } catch (err: any) {
+      await provider.sendTextMessage(phone, `\u26A0\uFE0F Could not prepare transfer details: ${err.message}`);
+    }
   }
 
   /**

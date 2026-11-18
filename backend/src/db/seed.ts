@@ -124,8 +124,8 @@ export async function runSeed(reset = false, nodeEnv = config.nodeEnv) {
   // Booking Group 1: John Doe
   const grp1Id = 'grp-demo-01';
   db.prepare(`
-    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, created_at, updated_at)
-    VALUES (?, 'GRP-JOHNDOE', 'hostel-male', 1, 'ALLOCATED', 'stu-demo-01', datetime('now', '-30 days'), 'rm-m-101', datetime('now', '-30 days'), datetime('now'))
+    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, billing_currency, created_at, updated_at)
+    VALUES (?, 'GRP-JOHNDOE', 'hostel-male', 1, 'ALLOCATED', 'stu-demo-01', datetime('now', '-30 days'), 'rm-m-101', 'USD', datetime('now', '-30 days'), datetime('now'))
   `).run(grp1Id);
 
   db.prepare(`
@@ -183,8 +183,8 @@ export async function runSeed(reset = false, nodeEnv = config.nodeEnv) {
 
   const grp2Id = 'grp-demo-02';
   db.prepare(`
-    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, created_at, updated_at)
-    VALUES (?, 'GRP-FEMALE-PAIR', 'hostel-female', 2, 'ALLOCATED', 'stu-demo-02', datetime('now', '-20 days'), 'rm-f-201', datetime('now', '-20 days'), datetime('now'))
+    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, billing_currency, created_at, updated_at)
+    VALUES (?, 'GRP-FEMALE-PAIR', 'hostel-female', 2, 'ALLOCATED', 'stu-demo-02', datetime('now', '-20 days'), 'rm-f-201', 'USD', datetime('now', '-20 days'), datetime('now'))
   `).run(grp2Id);
 
   db.prepare(`
@@ -261,8 +261,8 @@ export async function runSeed(reset = false, nodeEnv = config.nodeEnv) {
 
   const grp3Id = 'grp-demo-03';
   db.prepare(`
-    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, created_at, updated_at)
-    VALUES (?, 'GRP-TRIPLE-MATCH', 'hostel-male', 3, 'READY_FOR_ALLOCATION', 'stu-demo-04', datetime('now', '-5 days'), 'rm-m-301', datetime('now', '-6 days'), datetime('now'))
+    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, billing_currency, created_at, updated_at)
+    VALUES (?, 'GRP-TRIPLE-MATCH', 'hostel-male', 3, 'READY_FOR_ALLOCATION', 'stu-demo-04', datetime('now', '-5 days'), 'rm-m-301', 'USD', datetime('now', '-6 days'), datetime('now'))
   `).run(grp3Id);
 
   db.prepare(`
@@ -303,8 +303,8 @@ export async function runSeed(reset = false, nodeEnv = config.nodeEnv) {
 
   const grp4Id = 'grp-demo-04';
   db.prepare(`
-    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, created_at, updated_at)
-    VALUES (?, 'GRP-CHLOE-WAIT', 'hostel-female', 2, 'FORMING', 'stu-demo-07', NULL, NULL, datetime('now', '-2 days'), datetime('now'))
+    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, billing_currency, created_at, updated_at)
+    VALUES (?, 'GRP-CHLOE-WAIT', 'hostel-female', 2, 'FORMING', 'stu-demo-07', NULL, NULL, 'USD', datetime('now', '-2 days'), datetime('now'))
   `).run(grp4Id);
 
   db.prepare(`
@@ -333,8 +333,8 @@ export async function runSeed(reset = false, nodeEnv = config.nodeEnv) {
   });
   const grp5Id = 'grp-demo-05';
   db.prepare(`
-    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, created_at, updated_at)
-    VALUES (?, 'GRP-LIAM-EXP', 'hostel-male', 1, 'ALLOCATED', 'stu-demo-08', '2025-11-09', 'rm-m-102', '2025-11-09', datetime('now'))
+    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, billing_currency, created_at, updated_at)
+    VALUES (?, 'GRP-LIAM-EXP', 'hostel-male', 1, 'ALLOCATED', 'stu-demo-08', '2025-11-09', 'rm-m-102', 'USD', '2025-11-09', datetime('now'))
   `).run(grp5Id);
   db.prepare(`
     INSERT OR IGNORE INTO booking_group_members (id, group_id, student_id, role, is_matched_from_queue, joined_at)
@@ -371,8 +371,8 @@ export async function runSeed(reset = false, nodeEnv = config.nodeEnv) {
   });
   const grp6Id = 'grp-demo-06';
   db.prepare(`
-    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, created_at, updated_at)
-    VALUES (?, 'GRP-CLARA-EXP', 'hostel-female', 1, 'ALLOCATED', 'stu-demo-09', '2025-11-15', 'rm-f-101', '2025-11-15', datetime('now'))
+    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, billing_currency, created_at, updated_at)
+    VALUES (?, 'GRP-CLARA-EXP', 'hostel-female', 1, 'ALLOCATED', 'stu-demo-09', '2025-11-15', 'rm-f-101', 'USD', '2025-11-15', datetime('now'))
   `).run(grp6Id);
   db.prepare(`
     INSERT OR IGNORE INTO booking_group_members (id, group_id, student_id, role, is_matched_from_queue, joined_at)
@@ -409,8 +409,8 @@ export async function runSeed(reset = false, nodeEnv = config.nodeEnv) {
   });
   const grp7Id = 'grp-demo-07';
   db.prepare(`
-    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, created_at, updated_at)
-    VALUES (?, 'GRP-DAVID-EXP', 'hostel-male', 2, 'ALLOCATED', 'stu-demo-10', '2025-11-28', 'rm-m-201', '2025-11-28', datetime('now'))
+    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, billing_currency, created_at, updated_at)
+    VALUES (?, 'GRP-DAVID-EXP', 'hostel-male', 2, 'ALLOCATED', 'stu-demo-10', '2025-11-28', 'rm-m-201', 'USD', '2025-11-28', datetime('now'))
   `).run(grp7Id);
   db.prepare(`
     INSERT OR IGNORE INTO booking_group_members (id, group_id, student_id, role, is_matched_from_queue, joined_at)
@@ -446,8 +446,8 @@ export async function runSeed(reset = false, nodeEnv = config.nodeEnv) {
   });
   const grp8Id = 'grp-demo-08';
   db.prepare(`
-    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, created_at, updated_at)
-    VALUES (?, 'GRP-PETER-REV', 'hostel-male', 1, 'ALLOCATED', 'stu-demo-11', '2025-10-25', 'rm-m-103', '2025-10-25', datetime('now'))
+    INSERT OR IGNORE INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, held_room_id, billing_currency, created_at, updated_at)
+    VALUES (?, 'GRP-PETER-REV', 'hostel-male', 1, 'ALLOCATED', 'stu-demo-11', '2025-10-25', 'rm-m-103', 'USD', '2025-10-25', datetime('now'))
   `).run(grp8Id);
   db.prepare(`
     INSERT OR IGNORE INTO booking_group_members (id, group_id, student_id, role, is_matched_from_queue, joined_at)

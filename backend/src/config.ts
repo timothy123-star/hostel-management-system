@@ -79,4 +79,18 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env): 
   if (knownDemoAdminPasswords.has(adminPassword)) {
     throw new Error('Production ADMIN_PASSWORD must not use a known demo or example password.');
   }
+
+  // Monnify is OFF by default. Live activation requires explicit live
+  // credentials; sandbox credentials must never be enabled in production.
+  const monnifyEnabled = (env.MONNIFY_ENABLED || '').trim().toLowerCase() === 'true';
+  if (monnifyEnabled) {
+    const mode = (env.MONNIFY_MODE || '').trim().toLowerCase();
+    if (mode !== 'live') throw new Error('Production Monnify activation requires MONNIFY_MODE=live.');
+    if ((env.MONNIFY_BASE_URL || '').trim() !== 'https://api.monnify.com') {
+      throw new Error('Production Monnify activation requires the approved live base URL.');
+    }
+    if (!(env.MONNIFY_API_KEY || '').trim() || !(env.MONNIFY_SECRET_KEY || '').trim() || !(env.MONNIFY_CONTRACT_CODE || '').trim()) {
+      throw new Error('Production Monnify activation requires live API credentials and contract code.');
+    }
+  }
 }

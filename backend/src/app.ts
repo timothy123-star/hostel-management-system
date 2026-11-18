@@ -16,6 +16,8 @@ import { statsRouter } from './routes/statsRoutes.js';
 import { auditRouter } from './routes/auditRoutes.js';
 import { whatsappRouter } from './routes/whatsappRoutes.js';
 import { studentPhotoRouter } from './routes/studentPhotoRoutes.js';
+import { monnifyRouter } from './routes/monnifyRoutes.js';
+import { monnifyWebhookRouter } from './routes/monnifyWebhook.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -46,6 +48,8 @@ export function createApp() {
   app.use('/api/students', studentRouter);
   app.use('/api/bookings', bookingRouter);
   app.use('/api/payments', paymentRouter);
+  app.use('/api/monnify', monnifyRouter);
+  app.use('/api/webhooks/monnify', monnifyWebhookRouter);
   app.use('/api/allocations', allocationRouter);
   app.use('/api/qr', qrRouter);
   app.use('/api/renewals', renewalRouter);

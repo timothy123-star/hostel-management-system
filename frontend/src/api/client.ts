@@ -130,6 +130,10 @@ export const api = {
   getDemoTransactions: (status?: string) => apiRequest<{ transactions: any[] }>(`/payments/demo-transactions${status ? `?status=${status}` : ''}`),
   reconcileDemoTransaction: (id: string) => apiRequest<any>(`/payments/demo-transactions/${id}/reconcile`, { method: 'POST' }),
   rejectDemoTransaction: (id: string, reason: string) => apiRequest<any>(`/payments/demo-transactions/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  getMonnifyStatus: () => apiRequest<{ monnify: { enabled: boolean; mode: string } }>(`/monnify/status`),
+  getMonnifyAttempts: (paymentId?: string) => apiRequest<{ attempts: any[] }>(`/monnify/attempts${paymentId ? `?paymentId=${paymentId}` : ''}`),
+  initiateMonnifyAttempt: (paymentId: string) => apiRequest<{ attempt: any }>(`/monnify/initiate`, { method: 'POST', body: JSON.stringify({ paymentId }) }),
+  reconcileMonnifyAttempt: (merchantReference: string) => apiRequest<{ attempt: any }>(`/monnify/reconcile`, { method: 'POST', body: JSON.stringify({ merchantReference }) }),
 
   // Allocation
   finalizeAllocation: (data: { groupId: string; accommodationStartDate: string; overrideRoomId?: string; overrideReason?: string }) =>

@@ -458,3 +458,54 @@ CREATE TABLE IF NOT EXISTS whatsapp_conversation_archives (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_wa_conv_archives_phone ON whatsapp_conversation_archives(phone_number, created_at);
+
+-- Phase 1 Monnify provider integration (additive only; legacy rows untouched).
+CREATE TABLE IF NOT EXISTS payment_attempts (
+  id TEXT PRIMARY KEY,
+  payment_id TEXT NOT NULL REFERENCES payments(id) ON DELETE RESTRICT,
+  provider TEXT NOT NULL DEFAULT 'MONNIFY' CHECK (provider = 'MONNIFY'),
+  merchant_reference TEXT NOT NULL UNIQUE,
+  monnify_transaction_reference TEXT UNIQUE,
+  amount_kobo INTEGER NOT NULL CHECK (amount_kobo > 0),
+  currency TEXT NOT NULL DEFAULT 'NGN' CHECK (currency = 'NGN'),
+  account_number TEXT,
+  bank_name TEXT,
+  account_name TEXT,
+  account_expires_at TEXT,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','RECONCILED','MISMATCH','EXPIRED','FAILED','REVERSED','SUPERSEDED')),
+  provider_metadata TEXT,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  paid_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_payment_attempts_payment ON payment_attempts(payment_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_payment_attempts_merchant ON payment_attempts(merchant_reference);
+CREATE INDEX IF NOT EXISTS idx_payment_attempts_txnref ON payment_attempts(monnify_transaction_reference);
+
+CREATE TABLE IF NOT EXISTS monnify_webhook_events (
+  id TEXT PRIMARY KEY,
+  event_hash TEXT NOT NULL UNIQUE,
+  payment_reference TEXT,
+  transaction_reference TEXT,
+  raw_payload TEXT NOT NULL,
+  signature_present INTEGER NOT NULL DEFAULT 0 CHECK (signature_present IN (0, 1)),
+  signature_valid INTEGER,
+  processing_status TEXT NOT NULL DEFAULT 'RECEIVED' CHECK (processing_status IN ('RECEIVED','PROCESSED','DUPLICATE','FAILED')),
+  processing_result TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  processed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_monnify_webhook_refs ON monnify_webhook_events(payment_reference, transaction_reference);
+
+CREATE TABLE IF NOT EXISTS official_session_prices (
+  capacity INTEGER PRIMARY KEY CHECK (capacity IN (1, 2, 3)),
+  amount_kobo INTEGER NOT NULL CHECK (amount_kobo > 0),
+  currency TEXT NOT NULL DEFAULT 'NGN' CHECK (currency = 'NGN'),
+  updated_by_admin_id TEXT REFERENCES admin_users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT OR IGNORE INTO official_session_prices (capacity, amount_kobo, currency) VALUES (1, 240000000, 'NGN');
+INSERT OR IGNORE INTO official_session_prices (capacity, amount_kobo, currency) VALUES (2, 120000000, 'NGN');
+INSERT OR IGNORE INTO official_session_prices (capacity, amount_kobo, currency) VALUES (3, 80000000, 'NGN');

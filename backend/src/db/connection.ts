@@ -171,6 +171,67 @@ export function initSchema(db: Database.Database) {
     db.exec("UPDATE admin_users SET must_change_password = 1 WHERE role = 'SECURITY'");
   }
 
+  // Phase 1 Monnify provider tables (additive; legacy payment rows untouched).
+  db.exec(`CREATE TABLE IF NOT EXISTS payment_attempts (
+  id TEXT PRIMARY KEY,
+  payment_id TEXT NOT NULL REFERENCES payments(id) ON DELETE RESTRICT,
+  provider TEXT NOT NULL DEFAULT 'MONNIFY' CHECK (provider = 'MONNIFY'),
+  merchant_reference TEXT NOT NULL UNIQUE,
+  monnify_transaction_reference TEXT UNIQUE,
+  amount_kobo INTEGER NOT NULL CHECK (amount_kobo > 0),
+  currency TEXT NOT NULL DEFAULT 'NGN' CHECK (currency = 'NGN'),
+  account_number TEXT,
+  bank_name TEXT,
+  account_name TEXT,
+  account_expires_at TEXT,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','RECONCILED','MISMATCH','EXPIRED','FAILED','REVERSED','SUPERSEDED')),
+  provider_metadata TEXT,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  paid_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_payment_attempts_payment ON payment_attempts(payment_id, created_at)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_payment_attempts_merchant ON payment_attempts(merchant_reference)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_payment_attempts_txnref ON payment_attempts(monnify_transaction_reference)`);
+  db.exec(`CREATE TABLE IF NOT EXISTS monnify_webhook_events (
+  id TEXT PRIMARY KEY,
+  event_hash TEXT NOT NULL UNIQUE,
+  payment_reference TEXT,
+  transaction_reference TEXT,
+  raw_payload TEXT NOT NULL,
+  signature_present INTEGER NOT NULL DEFAULT 0 CHECK (signature_present IN (0, 1)),
+  signature_valid INTEGER,
+  processing_status TEXT NOT NULL DEFAULT 'RECEIVED' CHECK (processing_status IN ('RECEIVED','PROCESSED','DUPLICATE','FAILED')),
+  processing_result TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  processed_at TEXT
+)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_monnify_webhook_refs ON monnify_webhook_events(payment_reference, transaction_reference)`);
+  db.exec(`CREATE TABLE IF NOT EXISTS official_session_prices (
+  capacity INTEGER PRIMARY KEY CHECK (capacity IN (1, 2, 3)),
+  amount_kobo INTEGER NOT NULL CHECK (amount_kobo > 0),
+  currency TEXT NOT NULL DEFAULT 'NGN' CHECK (currency = 'NGN'),
+  updated_by_admin_id TEXT REFERENCES admin_users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+  db.prepare(`INSERT OR IGNORE INTO official_session_prices (capacity, amount_kobo, currency) VALUES (1, 240000000, 'NGN')`).run();
+  db.prepare(`INSERT OR IGNORE INTO official_session_prices (capacity, amount_kobo, currency) VALUES (2, 120000000, 'NGN')`).run();
+  db.prepare(`INSERT OR IGNORE INTO official_session_prices (capacity, amount_kobo, currency) VALUES (3, 80000000, 'NGN')`).run();
+  const payCols = db.prepare("PRAGMA table_info(payments)").all() as any[];
+  if (!payCols.some(column => column.name === 'amount_kobo')) {
+    db.exec('ALTER TABLE payments ADD COLUMN amount_kobo INTEGER CHECK (amount_kobo IS NULL OR amount_kobo > 0)');
+  }
+  if (!payCols.some(column => column.name === 'provider')) {
+    db.exec("ALTER TABLE payments ADD COLUMN provider TEXT NOT NULL DEFAULT 'DEMO_BANK'");
+  }
+  const grpCols = db.prepare("PRAGMA table_info(booking_groups)").all() as any[];
+  if (!grpCols.some(column => column.name === 'billing_currency')) {
+    db.exec("ALTER TABLE booking_groups ADD COLUMN billing_currency TEXT NOT NULL DEFAULT 'NGN'");
+    try { db.prepare("UPDATE booking_groups SET billing_currency = 'USD' WHERE id IN (SELECT DISTINCT booking_group_id FROM payments WHERE currency = 'USD' AND (amount_kobo IS NULL))").run(); } catch { /* ignore */ }
+  }
+
   // Preserve already-uploaded photographs when upgrading from the first photo
   // upload milestone into the review-history model.
   db.exec(`

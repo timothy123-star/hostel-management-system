@@ -45,7 +45,15 @@ export class PaymentService {
     if (existing.status !== 'PENDING') {
       throw new Error(`Only pending payments can be approved. This payment is already ${existing.status.toLowerCase()}.`);
     }
-    if (existing.reconciliation_status === 'AWAITING_RECONCILIATION') {
+    if (existing.currency === 'NGN' || existing.provider === 'MONNIFY' || existing.amount_kobo != null) {
+      if (existing.reconciliation_status !== 'RECONCILED') {
+        throw new Error('This Monnify payment must complete provider verification with the exact NGN amount before manager approval.');
+      }
+      const attempt = db.prepare(`SELECT * FROM payment_attempts WHERE payment_id = ? AND status = 'RECONCILED' ORDER BY paid_at DESC LIMIT 1`).get(paymentId) as any;
+      if (!attempt || attempt.amount_kobo !== existing.amount_kobo) {
+        throw new Error('A successfully reconciled Monnify attempt with the exact expected amount is required before manager approval.');
+      }
+    } else if (existing.reconciliation_status === 'AWAITING_RECONCILIATION') {
       throw new Error('This demo transfer must be reconciled from the incoming bank ledger; direct verification is disabled.');
     }
 

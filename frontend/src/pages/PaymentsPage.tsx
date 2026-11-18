@@ -11,6 +11,8 @@ export const PaymentsPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [monnify, setMonnify] = useState<{ enabled: boolean; mode: string } | null>(null);
+  const [attempts, setAttempts] = useState<any[]>([]);
 
   // Actions
   const [verifyingPayment, setVerifyingPayment] = useState<Payment | null>(null);
@@ -24,9 +26,11 @@ export const PaymentsPage: React.FC = () => {
   const loadPayments = async () => {
     setIsLoading(true);
     try {
-      const [res, txnRes] = await Promise.all([api.getPayments(statusFilter !== 'ALL' ? statusFilter : undefined), api.getDemoTransactions()]);
+      const [res, txnRes, monRes, attRes] = await Promise.all([api.getPayments(statusFilter !== 'ALL' ? statusFilter : undefined), api.getDemoTransactions(), api.getMonnifyStatus().catch(() => ({ monnify: { enabled: false, mode: 'disabled' } })), api.getMonnifyAttempts().catch(() => ({ attempts: [] }))]);
       setPayments(res.payments);
       setTransactions(txnRes.transactions);
+      setMonnify(monRes.monnify);
+      setAttempts(attRes.attempts);
     } catch (err) {
       console.error('Failed to load payments:', err);
     } finally {
@@ -121,6 +125,14 @@ export const PaymentsPage: React.FC = () => {
             <option value="REJECTED">Rejected</option>
           </select>
         </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b"><h3 className="font-bold text-sm">Monnify Transfer Attempts — provider evidence only, not manager approval</h3><p className="text-xs text-slate-500 mt-1">Status: {monnify ? `${monnify.enabled ? 'ENABLED' : 'DISABLED'} (${monnify.mode})` : 'loading…'} — reconciliation never approves a payment; only explicit manager approval sets VERIFIED.</p></div>
+        <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="bg-slate-50 text-slate-500 uppercase"><tr><th className="p-3">Attempt / obligation</th><th className="p-3">Expected NGN</th><th className="p-3">Virtual account</th><th className="p-3">Expiry</th><th className="p-3">Provider status</th><th className="p-3"></th></tr></thead><tbody>
+          {attempts.map(a => <tr key={a.id} className="border-t"><td className="p-3 font-mono">{a.merchant_reference}<br/><span className="text-slate-400">{a.obligation_reference} · {a.student_name || a.student_id}</span></td><td className="p-3 font-semibold">₦{(a.amount_kobo / 100).toLocaleString('en-NG')}</td><td className="p-3">{a.account_number ? `${a.bank_name} · ${a.account_number} · ${a.account_name}` : '—'}</td><td className="p-3">{a.account_expires_at || '—'}</td><td className="p-3"><StatusBadge status={a.status} size="sm" /></td><td className="p-3 text-right">{a.status === 'PENDING' && <button onClick={async () => { try { await api.reconcileMonnifyAttempt(a.merchant_reference); await loadPayments(); } catch (e: any) { alert(e.message); await loadPayments(); } }} className="min-h-[44px] px-3 py-1 bg-emerald-600 text-white rounded">Verify with provider</button>}</td></tr>)}
+          {attempts.length === 0 && <tr><td className="p-3 text-slate-500" colSpan={6}>No Monnify attempts yet.</td></tr>}
+        </tbody></table></div>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
