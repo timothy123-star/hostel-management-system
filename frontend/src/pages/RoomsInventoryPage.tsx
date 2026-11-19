@@ -157,7 +157,7 @@ export const RoomsInventoryPage: React.FC = () => {
                 <th className="py-3 px-4">Room #</th>
                 <th className="py-3 px-4">Facility</th>
                 <th className="py-3 px-4">Capacity</th>
-                <th className="py-3 px-4">Price / Student (DEMO)</th>
+                <th className="py-3 px-4">Price / Resident / Session (NGN)</th>
                 <th className="py-3 px-4">Status & Occupancy</th>
                 <th className="py-3 px-4">Current Occupants</th>
                 <th className="py-3 px-4 text-right">Actions</th>
@@ -338,7 +338,7 @@ export const RoomsInventoryPage: React.FC = () => {
                 type="submit"
                 className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-medium transition"
               >
-                Update Price (DEMO)
+                Update Price
               </button>
             </div>
           </form>

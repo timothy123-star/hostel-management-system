@@ -127,7 +127,7 @@ export const HostelFacilityPage: React.FC<HostelFacilityPageProps> = ({ hostelCo
               <tr>
                 <th className="py-3 px-4">Room #</th>
                 <th className="py-3 px-4">Capacity</th>
-                <th className="py-3 px-4">Price / Student (DEMO)</th>
+                <th className="py-3 px-4">Price / Resident / Session (NGN)</th>
                 <th className="py-3 px-4">Occupancy Status</th>
                 <th className="py-3 px-4">Current Occupants</th>
                 <th className="py-3 px-4 text-right">Actions</th>
@@ -202,13 +202,13 @@ export const HostelFacilityPage: React.FC<HostelFacilityPageProps> = ({ hostelCo
               Configure inventory reference price for room <strong className="text-slate-800">{editingRoom.room_number}</strong> ({facilityName}). New obligations use the official capacity schedule.
             </p>
 
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
-              <span className="font-bold">DEMO Label:</span> This price is explicitly labelled as demo data for testing and prototype evaluation.
+            <div className="p-3 bg-sky-50 border border-sky-200 rounded-xl text-xs text-sky-900">
+              Official accommodation charges are determined by the capacity-based pricing schedule. This room price is an inventory reference and does not override official booking charges.
             </div>
 
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5">
-                Price Per Student ($ / year)
+                Price Per Resident (₦ NGN / Academic Session)
               </label>
               <input
                 type="number"
@@ -234,7 +234,7 @@ export const HostelFacilityPage: React.FC<HostelFacilityPageProps> = ({ hostelCo
                 disabled={isUpdatingPrice}
                 className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-medium transition"
               >
-                {isUpdatingPrice ? 'Saving...' : 'Save Price (DEMO)'}
+                {isUpdatingPrice ? 'Saving...' : 'Save Price'}
               </button>
             </div>
           </form>
