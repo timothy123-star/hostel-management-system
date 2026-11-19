@@ -6,7 +6,7 @@ import { BookingGroupService } from '../bookingGroupService.js';
 import { QRService } from '../qrService.js';
 import { PaymentService } from '../paymentService.js';
 import { getActiveAttempt, initiateAttempt, monnifyStatus } from '../monnify/monnifyPayments.js';
-import { formatNgn } from '../monnify/pricing.js';
+import { formatNgn, formatOfficialPerResident, formatPaymentAmount } from '../monnify/pricing.js';
 import {
   WhatsAppState,
   RoomCapacity,
@@ -288,16 +288,22 @@ export class ConversationHandler {
         text += `*Booking Status:* ${String(group.status).replace(/_/g, ' ')}\n`;
       }
       if (group.provisional_room) {
+        const holdDesc = (group.provisional_room as any).currency === 'NGN' || (group.provisional_room as any).amount_kobo != null
+          ? formatPaymentAmount((group.provisional_room as any).amount ?? (group.provisional_room as any).price_per_student, 'NGN', (group.provisional_room as any).amount_kobo ?? null)
+          : formatOfficialPerResident(group.provisional_room.capacity);
         text += `\n🛏️ *Temporary Room Hold (not final allocation):* Room ${group.provisional_room.room_number}, ` +
-          `${group.provisional_room.capacity}-person capacity, $${group.provisional_room.price_per_student} per student.\n` +
+          `${group.provisional_room.capacity}-person capacity, ${holdDesc}.\n` +
           `_All group payments must be verified before the manager can finalize this room._\n`;
       }
     }
     if (payment) {
+      const amtDesc = formatPaymentAmount(payment.amount, payment.currency, payment.amount_kobo ?? null);
       text += `\n💳 *Payment Status:* ${payment.status}\n` +
-        `*Amount:* $${payment.amount} (Ref: ${payment.reference_code})\n`;
+        `*Amount:* ${amtDesc} (Ref: ${payment.reference_code})\n`;
       if (payment.status === 'PENDING') {
-        text += `_Your payment has been logged and is awaiting manager verification. DEMO ONLY — no real money._\n`;
+        text += payment.currency === 'NGN'
+          ? `_Your payment has been logged and is awaiting manager verification. DEMO PAYMENT — NO REAL MONEY._\n`
+          : `_Your payment has been logged and is awaiting manager verification. ${payment.currency} DEMO price — no real money._\n`;
       }
     }
     if (alloc && alloc.status === 'FINALIZED') {
@@ -394,7 +400,15 @@ export class ConversationHandler {
         await this.handleMonnifyInstructions(phone, payment, provider);
         return;
       }
-      await provider.sendQuickReplyButtons(phone, `\uD83D\uDCB3 *INDIVIDUAL ACCOMMODATION PAYMENT INSTRUCTIONS*\n\nStudent: *${payment.full_name}*\nFacility: *${payment.hostel_name}*\nTemporary Room Hold: *${payment.room_number}* (${payment.capacity}-person)\nAmount: *$${payment.amount} ${payment.currency} (DEMO price)*\nPayment Reference: *${payment.reference_code}*\nStatus: *${payment.reconciliation_status || payment.status}*\n\nBank: *${bank.name}*\nAccount Name: *${bank.accountName}*\nAccount Number: *${bank.accountNumber}*\n\n\u26A0\uFE0F *${demoWarning}*`, [{ id: 'btn_simulate_bank_transfer', title: 'SIMULATE BANK TRANSFER' }]);
+      const perResident = payment.capacity === 1
+        ? 'Amount: \u20A62,400,000 NGN per academic session'
+        : payment.capacity === 2
+          ? 'Amount: \u20A61,200,000 NGN per resident per academic session'
+          : 'Amount: \u20A6800,000 NGN per resident per academic session';
+      const amtLine = payment.currency === 'NGN'
+        ? formatPaymentAmount(payment.amount, payment.currency, payment.amount_kobo ?? null)
+        : `$${payment.amount} ${payment.currency} (DEMO price)`;
+      await provider.sendQuickReplyButtons(phone, `\uD83D\uDCB3 *INDIVIDUAL ACCOMMODATION PAYMENT INSTRUCTIONS*\n\n*DEMO PAYMENT — NO REAL MONEY*\n\nStudent: *${payment.full_name}*\nFacility: *${payment.hostel_name}*\nTemporary Room Hold: *${payment.room_number}* (${payment.capacity}-person)\n${perResident}\nAmount due: *${amtLine}*\nPayment Reference: *${payment.reference_code}*\nStatus: *${payment.reconciliation_status || payment.status}*\n\nBank: *${bank.name}*\nAccount Name: *${bank.accountName}*\nAccount Number: *${bank.accountNumber}*\n\n\u26A0\uFE0F *${demoWarning}*`, [{ id: 'btn_simulate_bank_transfer', title: 'SIMULATE BANK TRANSFER' }]);
     } catch (err: any) { await provider.sendTextMessage(phone, `\u26A0\uFE0F ${err.message}`); }
   }
 
@@ -549,7 +563,7 @@ export class ConversationHandler {
     if (buttonId === 'btn_simulate_bank_transfer') {
       try {
         const txn = PaymentService.simulateBankTransfer(phone);
-        await provider.sendTextMessage(phone, `✅ *DEMO TRANSFER RECORDED — NO REAL MONEY*\n\nYour demo transfer has been recorded and is awaiting hostel payment verification.\n\nSimulated bank receipt: *${txn.bank_transaction_reference}*\nPayment reference: *${txn.payment_reference}*\nAmount: $${txn.amount} ${txn.currency}`);
+        await provider.sendTextMessage(phone, `✅ *DEMO TRANSFER RECORDED — NO REAL MONEY*\n\nYour demo transfer has been recorded and is awaiting hostel payment verification.\n\nSimulated bank receipt: *${txn.bank_transaction_reference}*\nPayment reference: *${txn.payment_reference}*\nAmount: *${formatPaymentAmount(txn.amount, txn.currency, (txn as any).amount_kobo ?? null)}*\n_DEMO PAYMENT — NO REAL MONEY. No real funds moved._`);
       } catch (err: any) { await provider.sendTextMessage(phone, `⚠️ ${err.message}`); }
       return;
     }
@@ -684,9 +698,9 @@ export class ConversationHandler {
         await provider.sendQuickReplyButtons(
           phone,
           `📝 *Hostel Registration — Step 5/6*\n\nPlease select your preferred room occupancy:\n\n` +
-          `• *Single:* 1 student ($1,200/yr DEMO)\n` +
-          `• *Double:* 2 students ($800/yr DEMO)\n` +
-          `• *Triple:* 3 students ($600/yr DEMO)`,
+          `• *Single:* 1 student (\u20A62,400,000 NGN per resident per academic session)\n` +
+          `• *Double:* 2 students (\u20A61,200,000 NGN per resident per academic session)\n` +
+          `• *Triple:* 3 students (\u20A6800,000 NGN per resident per academic session)`,
           [
             { id: 'occ_1', title: 'Single Room (1)' },
             { id: 'occ_2', title: 'Double Room (2)' },

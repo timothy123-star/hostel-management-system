@@ -231,6 +231,14 @@ export function initSchema(db: Database.Database) {
     db.exec("ALTER TABLE booking_groups ADD COLUMN billing_currency TEXT NOT NULL DEFAULT 'NGN'");
     try { db.prepare("UPDATE booking_groups SET billing_currency = 'USD' WHERE id IN (SELECT DISTINCT booking_group_id FROM payments WHERE currency = 'USD' AND (amount_kobo IS NULL))").run(); } catch { /* ignore */ }
   }
+  // Official NGN room inventory: replace clearly-demonstrated USD placeholders
+  // (1200/800/600) with per-resident NGN naira values. Idempotent; preserves any
+  // manager-customized prices that do not match the old demo placeholders.
+  try {
+    db.prepare(`UPDATE rooms SET price_per_student = 2400000, updated_at = datetime('now') WHERE capacity = 1 AND price_per_student = 1200`).run();
+    db.prepare(`UPDATE rooms SET price_per_student = 1200000, updated_at = datetime('now') WHERE capacity = 2 AND price_per_student = 800`).run();
+    db.prepare(`UPDATE rooms SET price_per_student = 800000, updated_at = datetime('now') WHERE capacity = 3 AND price_per_student = 600`).run();
+  } catch { /* rooms table may not exist yet in fresh migrations */ }
 
   // Preserve already-uploaded photographs when upgrading from the first photo
   // upload milestone into the review-history model.

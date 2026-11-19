@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { getDb } from '../db/connection.js';
 import { BookingGroup, BookingGroupStatus, RoomCapacity, HostelCode } from '@hostel/shared';
+import { officialAmountKobo, koboToNaira, resolveOfficialPricing } from './monnify/pricing.js';
 
 export class BookingGroupService {
   /**
@@ -70,7 +71,7 @@ export class BookingGroupService {
     db.transaction(() => {
       db.prepare(`
         INSERT INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, auto_complete_triple_consent, billing_currency, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'USD', ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'NGN', ?, ?)
       `).run(groupId, groupCode, hostel.id, params.targetCapacity, initialStatus, params.studentId, eligibleAt, params.autoCompleteTripleConsent ? 1 : 0, now, now);
 
       const memberId = `bgm-${crypto.randomUUID()}`;
@@ -79,17 +80,19 @@ export class BookingGroupService {
         VALUES (?, ?, ?, 'LEADER', 0, ?, ?)
       `).run(memberId, groupId, params.studentId, params.autoCompleteTripleConsent ? 1 : 0, now);
 
-      // Create initial payment record
-      const roomPrice = db.prepare('SELECT price_per_student FROM rooms WHERE hostel_id = ? AND capacity = ? LIMIT 1')
-        .get(hostel.id, params.targetCapacity) as any;
-      const amount = roomPrice ? roomPrice.price_per_student : (params.targetCapacity === 1 ? 1200 : params.targetCapacity === 2 ? 800 : 600);
+      // Official NGN obligation: authoritative per-resident per-session price. Never trusts client amounts.
+      const officialRow = (() => {
+        try { return db.prepare('SELECT amount_kobo FROM official_session_prices WHERE capacity = ?').get(params.targetCapacity) as any; }
+        catch { return null; }
+      })();
+      const official = resolveOfficialPricing(params.targetCapacity, officialRow?.amount_kobo ?? null);
 
       const paymentId = `pay-${crypto.randomUUID()}`;
       const refCode = `REF-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
       db.prepare(`
-        INSERT INTO payments (id, student_id, booking_group_id, amount, currency, status, reference_code, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'USD', 'PENDING', ?, ?, ?)
-      `).run(paymentId, params.studentId, groupId, amount, refCode, now, now);
+        INSERT INTO payments (id, student_id, booking_group_id, amount, amount_kobo, currency, provider, status, reference_code, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'NGN', 'DEMO_BANK', 'PENDING', ?, ?, ?)
+      `).run(paymentId, params.studentId, groupId, official.amountNaira, official.amountKobo, refCode, now, now);
 
     })();
 
@@ -158,17 +161,28 @@ export class BookingGroupService {
         VALUES (?, ?, ?, 'MEMBER', 0, ?, ?)
       `).run(memberId, group.id, studentId, autoCompleteTripleConsent ? 1 : 0, now);
 
-      // Create individual payment record for joining member
-      const roomPrice = db.prepare('SELECT price_per_student FROM rooms WHERE hostel_id = ? AND capacity = ? LIMIT 1')
-        .get(group.hostel_id, group.target_capacity) as any;
-      const amount = roomPrice ? roomPrice.price_per_student : (group.target_capacity === 2 ? 800 : 600);
-
+      // New member obligation matches the group's billing currency. New NGN groups use the
+      // official schedule; legacy USD groups keep their original USD amount (no silent conversion).
       const paymentId = `pay-${crypto.randomUUID()}`;
       const refCode = `REF-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-      db.prepare(`
-        INSERT INTO payments (id, student_id, booking_group_id, amount, currency, status, reference_code, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'USD', 'PENDING', ?, ?, ?)
-      `).run(paymentId, studentId, group.id, amount, refCode, now, now);
+      if ((group as any).billing_currency === 'USD') {
+        const leaderPay = db.prepare('SELECT amount FROM payments WHERE booking_group_id = ? ORDER BY created_at ASC LIMIT 1').get(group.id) as any;
+        const legacyAmount = leaderPay ? Number(leaderPay.amount) : (group.target_capacity === 1 ? 1200 : group.target_capacity === 2 ? 800 : 600);
+        db.prepare(`
+          INSERT INTO payments (id, student_id, booking_group_id, amount, currency, provider, status, reference_code, created_at, updated_at)
+          VALUES (?, ?, ?, ?, 'USD', 'DEMO_BANK', 'PENDING', ?, ?, ?)
+        `).run(paymentId, studentId, group.id, legacyAmount, refCode, now, now);
+      } else {
+        const officialRow = (() => {
+          try { return db.prepare('SELECT amount_kobo FROM official_session_prices WHERE capacity = ?').get((group as any).target_capacity) as any; }
+          catch { return null; }
+        })();
+        const official = resolveOfficialPricing((group as any).target_capacity as RoomCapacity, officialRow?.amount_kobo ?? null);
+        db.prepare(`
+          INSERT INTO payments (id, student_id, booking_group_id, amount, amount_kobo, currency, provider, status, reference_code, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, 'NGN', 'DEMO_BANK', 'PENDING', ?, ?, ?)
+        `).run(paymentId, studentId, group.id, official.amountNaira, official.amountKobo, refCode, now, now);
+      }
 
       if (isNowComplete) {
         // Group is complete! Set eligible_at to NOW for queue priority
@@ -228,7 +242,7 @@ export class BookingGroupService {
     const members = db.prepare(`
       SELECT bgm.*, 
              s.full_name, s.phone_number, s.gender, s.department, s.academic_level, s.photo_url,
-             p.id as payment_id, p.status as payment_status, p.amount as payment_amount, p.reference_code as payment_ref
+             p.id as payment_id, p.status as payment_status, p.amount as payment_amount, p.currency as payment_currency, p.amount_kobo as payment_amount_kobo, p.reference_code as payment_ref
       FROM booking_group_members bgm
       JOIN students s ON bgm.student_id = s.id
       LEFT JOIN payments p ON p.student_id = s.id AND p.booking_group_id = bgm.group_id
@@ -270,7 +284,8 @@ export class BookingGroupService {
           student_id: m.student_id,
           booking_group_id: m.group_id,
           amount: m.payment_amount,
-          currency: 'USD',
+          amount_kobo: m.payment_amount_kobo ?? undefined,
+          currency: m.payment_currency || 'USD',
           status: m.payment_status,
           reference_code: m.payment_ref,
           created_at: m.joined_at,

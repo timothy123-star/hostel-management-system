@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api/client.js';
 import { Payment } from '@hostel/shared';
+const formatPaymentAmount = (amount: number, currency: string, amountKobo?: number | null): string => {
+  if (currency === 'NGN' && amountKobo !== null && amountKobo !== undefined) {
+    try { if (!Number.isInteger(amountKobo) || amountKobo % 100 !== 0) throw new Error('bad'); return `₦${(amountKobo / 100).toLocaleString('en-NG')} per academic session`; } catch { /* fall through */ }
+  }
+  if (currency === 'NGN') return `₦${Number(amount).toLocaleString('en-NG')} per academic session`;
+  return `$${amount} ${currency} (DEMO price)`;
+};
 import { CreditCard, CheckCircle2, XCircle, Search, Filter, ShieldCheck, DollarSign } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge.js';
 import { Modal } from '../components/Modal.js';
@@ -138,7 +145,7 @@ export const PaymentsPage: React.FC = () => {
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b"><h3 className="font-bold text-sm">Incoming Demo Bank Transactions</h3></div>
         <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="bg-slate-50 text-slate-500 uppercase"><tr><th className="p-3">Bank transaction</th><th className="p-3">Payment reference / student</th><th className="p-3">Amount</th><th className="p-3">Beneficiary</th><th className="p-3">Status</th><th className="p-3"></th></tr></thead><tbody>
-          {transactions.map(txn => <tr key={txn.id} className="border-t"><td className="p-3 font-mono">{txn.bank_transaction_reference}<br/><span className="text-slate-400">{new Date(txn.transaction_timestamp).toLocaleString()}</span></td><td className="p-3">{txn.payment_reference}<br/><span className="text-slate-500">{txn.student_name || 'No proposed payment'}</span></td><td className="p-3 font-semibold">${txn.amount} {txn.currency}</td><td className="p-3">{txn.beneficiary_account}</td><td className="p-3"><StatusBadge status={txn.reconciliation_status} size="sm" /><p className="text-rose-600">{txn.exception_reason}</p></td><td className="p-3 text-right">{txn.reconciliation_status === 'PENDING_RECONCILIATION' && <div className="flex gap-1 justify-end"><button onClick={async () => { try { await api.reconcileDemoTransaction(txn.id); await loadPayments(); } catch (e: any) { alert(e.message); await loadPayments(); } }} className="min-h-[44px] px-3 py-1 bg-emerald-600 text-white rounded">Reconcile transaction</button><button onClick={async () => { const reason = window.prompt('Exception/rejection reason'); if (reason) { await api.rejectDemoTransaction(txn.id, reason); await loadPayments(); } }} className="min-h-[44px] px-3 py-1 bg-slate-100 rounded">Flag</button></div>}</td></tr>)}
+          {transactions.map(txn => <tr key={txn.id} className="border-t"><td className="p-3 font-mono">{txn.bank_transaction_reference}<br/><span className="text-slate-400">{new Date(txn.transaction_timestamp).toLocaleString()}</span></td><td className="p-3">{txn.payment_reference}<br/><span className="text-slate-500">{txn.student_name || 'No proposed payment'}</span></td><td className="p-3 font-semibold">{formatPaymentAmount(txn.amount, txn.currency, (txn as any).amount_kobo ?? null)}</td><td className="p-3">{txn.beneficiary_account}</td><td className="p-3"><StatusBadge status={txn.reconciliation_status} size="sm" /><p className="text-rose-600">{txn.exception_reason}</p></td><td className="p-3 text-right">{txn.reconciliation_status === 'PENDING_RECONCILIATION' && <div className="flex gap-1 justify-end"><button onClick={async () => { try { await api.reconcileDemoTransaction(txn.id); await loadPayments(); } catch (e: any) { alert(e.message); await loadPayments(); } }} className="min-h-[44px] px-3 py-1 bg-emerald-600 text-white rounded">Reconcile transaction</button><button onClick={async () => { const reason = window.prompt('Exception/rejection reason'); if (reason) { await api.rejectDemoTransaction(txn.id, reason); await loadPayments(); } }} className="min-h-[44px] px-3 py-1 bg-slate-100 rounded">Flag</button></div>}</td></tr>)}
         </tbody></table></div>
       </div>
 
@@ -168,7 +175,7 @@ export const PaymentsPage: React.FC = () => {
                     {p.group_code}
                   </td>
                   <td className="py-3 px-4 font-bold text-slate-900 text-sm">
-                    ${p.amount.toLocaleString()} <span className="text-[10px] text-slate-400 font-normal">{p.currency}</span>
+                    {formatPaymentAmount(p.amount, p.currency, (p as any).amount_kobo ?? null)}
                   </td>
                   <td className="py-3 px-4 font-mono text-slate-600 text-[11px]">
                     {p.reference_code}
@@ -229,7 +236,7 @@ export const PaymentsPage: React.FC = () => {
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 space-y-1">
               <p><strong>Student:</strong> {verifyingPayment.student_name}</p>
               <p><strong>Group:</strong> {verifyingPayment.group_code}</p>
-              <p><strong>Amount:</strong> ${verifyingPayment.amount} {verifyingPayment.currency}</p>
+              <p><strong>Amount:</strong> {formatPaymentAmount(verifyingPayment.amount, verifyingPayment.currency, (verifyingPayment as any).amount_kobo ?? null)}</p>
               <p><strong>Ref Code:</strong> <span className="font-mono">{verifyingPayment.reference_code}</span></p>
             </div>
 

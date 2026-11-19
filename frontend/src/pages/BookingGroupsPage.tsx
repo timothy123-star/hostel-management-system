@@ -4,6 +4,13 @@ import { BookingGroup, Room } from '@hostel/shared';
 import { UserCheck, CheckCircle2, AlertTriangle, Key, Bed, ArrowRight, ShieldCheck, Filter } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge.js';
 import { Modal } from '../components/Modal.js';
+const formatPaymentAmount = (amount: number, currency: string, amountKobo?: number | null): string => {
+  if (currency === 'NGN' && amountKobo !== null && amountKobo !== undefined) {
+    try { if (!Number.isInteger(amountKobo) || amountKobo % 100 !== 0) throw new Error('bad'); return `₦${(amountKobo / 100).toLocaleString('en-NG')} per academic session`; } catch { /* fall through */ }
+  }
+  if (currency === 'NGN') return `₦${Number(amount).toLocaleString('en-NG')} per academic session`;
+  return `$${amount} ${currency} (DEMO price)`;
+};
 
 export const BookingGroupsPage: React.FC = () => {
   const [groups, setGroups] = useState<BookingGroup[]>([]);
@@ -173,7 +180,7 @@ export const BookingGroupsPage: React.FC = () => {
                   <span>Target Occupancy: <strong className="text-slate-700">{g.target_capacity}-Person Room</strong></span>
                   <span>Members: <strong className="text-slate-700">{g.member_count || 0}/{g.target_capacity}</strong></span>
                 </div>
-                {g.provisional_room && <div className="mb-4 p-3 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-900"><strong>Temporary room hold — not allocated:</strong> Room {g.provisional_room.room_number}, capacity {g.provisional_room.capacity}, ${g.provisional_room.price_per_student} per student. This proposal is shown before payment and is released if final allocation does not proceed.</div>}
+                {g.provisional_room && <div className="mb-4 p-3 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-900"><strong>Temporary room hold — not allocated:</strong> Room {g.provisional_room.room_number}, capacity {g.provisional_room.capacity}, ₦{g.provisional_room.price_per_student.toLocaleString('en-NG')} NGN per resident per academic session. This proposal is shown before payment and is released if final allocation does not proceed.</div>}
 
                 {/* Member List */}
                 <div className="space-y-2 mb-4">
@@ -189,7 +196,7 @@ export const BookingGroupsPage: React.FC = () => {
                       </div>
                       <div className="text-right">
                         <StatusBadge status={m.payment?.status || 'PENDING'} size="sm" />
-                        <p className="text-[10px] text-slate-400 mt-0.5">${m.payment?.amount || 0} USD</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">{m.payment ? formatPaymentAmount(m.payment.amount, m.payment.currency, (m.payment as any).amount_kobo ?? null) : '$0 USD (DEMO price)'}</p>
                       </div>
                     </div>
                   ))}
@@ -332,7 +339,7 @@ export const BookingGroupsPage: React.FC = () => {
         <form onSubmit={submitGroupRelocation} className="space-y-4">
           <p className="text-xs text-slate-600">This moves every active member together, preserving their accommodation dates and QR credentials. Only an empty room of the same facility and occupancy may be selected.</p>
           <select value={relocationRoomId} onChange={e => setRelocationRoomId(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" required>
-            {availableRooms.map(room => <option key={room.id} value={room.id}>Room {room.room_number} — {room.capacity} beds, ${room.price_per_student}/student</option>)}
+            {availableRooms.map(room => <option key={room.id} value={room.id}>Room {room.room_number} — {room.capacity} beds, ₦{room.price_per_student.toLocaleString('en-NG')} NGN/student/session</option>)}
           </select>
           {relocationAvailabilityMessage && <p className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">{relocationAvailabilityMessage}</p>}
           <input value={relocationReason} onChange={e => setRelocationReason(e.target.value)} placeholder="Documented manager reason" className="w-full px-3 py-2 border rounded-xl text-sm" required />

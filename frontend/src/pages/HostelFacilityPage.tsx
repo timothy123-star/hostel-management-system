@@ -147,7 +147,7 @@ export const HostelFacilityPage: React.FC<HostelFacilityPageProps> = ({ hostelCo
                       </span>
                     </td>
                     <td className="py-3 px-4 font-semibold text-slate-800">
-                      ${r.price_per_student.toLocaleString()} <span className="text-[10px] text-amber-600 font-normal">(DEMO)</span>
+                      ₦{r.price_per_student.toLocaleString('en-NG')} <span className="text-[10px] text-slate-500 font-normal">NGN per resident per academic session</span>
                     </td>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2">
@@ -199,7 +199,7 @@ export const HostelFacilityPage: React.FC<HostelFacilityPageProps> = ({ hostelCo
         {editingRoom && (
           <form onSubmit={handleUpdatePrice} className="space-y-4">
             <p className="text-xs text-slate-500">
-              Configure sample annual accommodation fee for room <strong className="text-slate-800">{editingRoom.room_number}</strong> ({facilityName}).
+              Configure inventory reference price for room <strong className="text-slate-800">{editingRoom.room_number}</strong> ({facilityName}). New obligations use the official capacity schedule.
             </p>
 
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">

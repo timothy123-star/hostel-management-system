@@ -123,6 +123,8 @@ export interface Payment {
   student_id: string;
   booking_group_id: string;
   amount: number;
+  amount_kobo?: number | null;
+  provider?: string | null;
   currency: string;
   status: PaymentStatus;
   reference_code: string;

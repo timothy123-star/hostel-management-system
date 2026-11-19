@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { getDb } from '../db/connection.js';
 import { HostelCode, RoomCapacity } from '@hostel/shared';
 import { BookingGroupService } from './bookingGroupService.js';
+import { resolveOfficialPricing } from './monnify/pricing.js';
 
 export class MatchingService {
   /**
@@ -109,14 +110,17 @@ export class MatchingService {
             // Ensure payment record exists for the new member
             const paymentId = `pay-${crypto.randomUUID()}`;
             const refCode = `REF-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-            // Determine price
-            const roomPrice = db.prepare('SELECT price_per_student FROM rooms WHERE hostel_id = ? AND capacity = 3 LIMIT 1').get(hostelId) as any;
-            const amount = roomPrice ? roomPrice.price_per_student : 600;
+            // Official NGN obligation for the matched member (same source as booking creation).
+            const officialRow = (() => {
+              try { return db.prepare('SELECT amount_kobo FROM official_session_prices WHERE capacity = 3').get() as any; }
+              catch { return null; }
+            })();
+            const official = resolveOfficialPricing(3, officialRow?.amount_kobo ?? null);
 
             db.prepare(`
-              INSERT OR IGNORE INTO payments (id, student_id, booking_group_id, amount, currency, status, reference_code, created_at, updated_at)
-              VALUES (?, ?, ?, ?, 'USD', 'PENDING', ?, ?, ?)
-            `).run(paymentId, nextInQueue.student_id, group.id, amount, refCode, now, now);
+              INSERT OR IGNORE INTO payments (id, student_id, booking_group_id, amount, amount_kobo, currency, provider, status, reference_code, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, 'NGN', 'DEMO_BANK', 'PENDING', ?, ?, ?)
+            `).run(paymentId, nextInQueue.student_id, group.id, official.amountNaira, official.amountKobo, refCode, now, now);
           })();
         }
       }
@@ -142,14 +146,15 @@ export class MatchingService {
 
       db.transaction(() => {
         // Create complete group
+        const officialRow = (() => {
+          try { return db.prepare('SELECT amount_kobo FROM official_session_prices WHERE capacity = ?').get(capacity) as any; }
+          catch { return null; }
+        })();
+        const official = resolveOfficialPricing(capacity, officialRow?.amount_kobo ?? null);
         db.prepare(`
-          INSERT INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, created_at, updated_at)
-          VALUES (?, ?, ?, ?, 'READY_FOR_ALLOCATION', ?, ?, ?, ?)
+          INSERT INTO booking_groups (id, group_code, hostel_id, target_capacity, status, created_by_student_id, eligible_at, billing_currency, created_at, updated_at)
+          VALUES (?, ?, ?, ?, 'READY_FOR_ALLOCATION', ?, ?, 'NGN', ?, ?)
         `).run(groupId, groupCode, hostelId, capacity, leaderStudentId, now, now, now);
-
-        // Fetch price
-        const roomPrice = db.prepare('SELECT price_per_student FROM rooms WHERE hostel_id = ? AND capacity = ? LIMIT 1').get(hostelId, capacity) as any;
-        const amount = roomPrice ? roomPrice.price_per_student : (capacity === 2 ? 800 : 600);
 
         for (let i = 0; i < matchedBatch.length; i++) {
           const item = matchedBatch[i];
@@ -170,9 +175,9 @@ export class MatchingService {
           const paymentId = `pay-${crypto.randomUUID()}`;
           const refCode = `REF-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
           db.prepare(`
-            INSERT OR IGNORE INTO payments (id, student_id, booking_group_id, amount, currency, status, reference_code, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'USD', 'PENDING', ?, ?, ?)
-          `).run(paymentId, item.student_id, groupId, amount, refCode, now, now);
+            INSERT OR IGNORE INTO payments (id, student_id, booking_group_id, amount, amount_kobo, currency, provider, status, reference_code, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'NGN', 'DEMO_BANK', 'PENDING', ?, ?, ?)
+          `).run(paymentId, item.student_id, groupId, official.amountNaira, official.amountKobo, refCode, now, now);
         }
       })();
     }
@@ -230,10 +235,14 @@ export class MatchingService {
         .run(`bgm-${crypto.randomUUID()}`, groupId, selected.student_id, now);
       db.prepare("UPDATE matching_queue SET status = 'MATCHED', matched_at = ?, matched_group_id = ? WHERE id = ?").run(now, groupId, queueItemId);
       db.prepare("UPDATE booking_groups SET status = 'READY_FOR_ALLOCATION', eligible_at = ?, updated_at = ? WHERE id = ?").run(now, now, groupId);
-      const room = db.prepare('SELECT price_per_student FROM rooms WHERE hostel_id = ? AND capacity = 3 LIMIT 1').get(group.hostel_id) as any;
-      db.prepare(`INSERT INTO payments (id, student_id, booking_group_id, amount, currency, status, reference_code, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'USD', 'PENDING', ?, ?, ?)`)
-        .run(`pay-${crypto.randomUUID()}`, selected.student_id, groupId, room?.price_per_student || 600, `REF-${crypto.randomBytes(4).toString('hex').toUpperCase()}`, now, now);
+      const officialRow = (() => {
+        try { return db.prepare('SELECT amount_kobo FROM official_session_prices WHERE capacity = 3').get() as any; }
+        catch { return null; }
+      })();
+      const official = resolveOfficialPricing(3, officialRow?.amount_kobo ?? null);
+      db.prepare(`INSERT INTO payments (id, student_id, booking_group_id, amount, amount_kobo, currency, provider, status, reference_code, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'NGN', 'DEMO_BANK', 'PENDING', ?, ?, ?)`)
+        .run(`pay-${crypto.randomUUID()}`, selected.student_id, groupId, official.amountNaira, official.amountKobo, `REF-${crypto.randomBytes(4).toString('hex').toUpperCase()}`, now, now);
     })();
     BookingGroupService.assignProvisionalHolds(group.hostel_id, 3);
   }

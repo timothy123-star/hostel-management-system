@@ -88,7 +88,7 @@ export class HostelService {
       entityId: roomId,
       oldValues: { price_per_student: oldRoom.price_per_student },
       newValues: { price_per_student: newPrice },
-      notes: `Updated room ${oldRoom.room_number} price to $${newPrice} (DEMO)`
+      notes: `Updated room ${oldRoom.room_number} inventory price to \u20A6${Number(newPrice).toLocaleString('en-NG')} NGN per resident per academic session (inventory reference only; new obligations use the official capacity schedule)`
     });
 
     return this.getRoomById(roomId)!;

@@ -44,30 +44,30 @@ export async function runSeed(reset = false, nodeEnv = config.nodeEnv) {
   }
 
   // 3. Rooms (Single, Double, Triple)
-  // Demo prices: Single = $1,200/yr, Double = $800/yr, Triple = $600/yr
+  // Official NGN inventory (per resident per academic session): Single = 2400000, Double = 1200000, Triple = 800000
   const roomDefs = [
     // Male Hostel
-    { id: 'rm-m-101', hostelId: 'hostel-male', number: 'M-101', cap: 1, price: 1200 },
-    { id: 'rm-m-102', hostelId: 'hostel-male', number: 'M-102', cap: 1, price: 1200 },
-    { id: 'rm-m-103', hostelId: 'hostel-male', number: 'M-103', cap: 1, price: 1200 },
-    { id: 'rm-m-104', hostelId: 'hostel-male', number: 'M-104', cap: 1, price: 1200 },
-    { id: 'rm-m-105', hostelId: 'hostel-male', number: 'M-105', cap: 1, price: 1200 },
-    { id: 'rm-m-201', hostelId: 'hostel-male', number: 'M-201', cap: 2, price: 800 },
-    { id: 'rm-m-202', hostelId: 'hostel-male', number: 'M-202', cap: 2, price: 800 },
-    { id: 'rm-m-203', hostelId: 'hostel-male', number: 'M-203', cap: 2, price: 800 },
-    { id: 'rm-m-301', hostelId: 'hostel-male', number: 'M-301', cap: 3, price: 600 },
-    { id: 'rm-m-302', hostelId: 'hostel-male', number: 'M-302', cap: 3, price: 600 },
+    { id: 'rm-m-101', hostelId: 'hostel-male', number: 'M-101', cap: 1, price: 2400000 },
+    { id: 'rm-m-102', hostelId: 'hostel-male', number: 'M-102', cap: 1, price: 2400000 },
+    { id: 'rm-m-103', hostelId: 'hostel-male', number: 'M-103', cap: 1, price: 2400000 },
+    { id: 'rm-m-104', hostelId: 'hostel-male', number: 'M-104', cap: 1, price: 2400000 },
+    { id: 'rm-m-105', hostelId: 'hostel-male', number: 'M-105', cap: 1, price: 2400000 },
+    { id: 'rm-m-201', hostelId: 'hostel-male', number: 'M-201', cap: 2, price: 1200000 },
+    { id: 'rm-m-202', hostelId: 'hostel-male', number: 'M-202', cap: 2, price: 1200000 },
+    { id: 'rm-m-203', hostelId: 'hostel-male', number: 'M-203', cap: 2, price: 1200000 },
+    { id: 'rm-m-301', hostelId: 'hostel-male', number: 'M-301', cap: 3, price: 800000 },
+    { id: 'rm-m-302', hostelId: 'hostel-male', number: 'M-302', cap: 3, price: 800000 },
     // Female Hostel
-    { id: 'rm-f-101', hostelId: 'hostel-female', number: 'F-101', cap: 1, price: 1200 },
-    { id: 'rm-f-102', hostelId: 'hostel-female', number: 'F-102', cap: 1, price: 1200 },
-    { id: 'rm-f-103', hostelId: 'hostel-female', number: 'F-103', cap: 1, price: 1200 },
-    { id: 'rm-f-104', hostelId: 'hostel-female', number: 'F-104', cap: 1, price: 1200 },
-    { id: 'rm-f-105', hostelId: 'hostel-female', number: 'F-105', cap: 1, price: 1200 },
-    { id: 'rm-f-201', hostelId: 'hostel-female', number: 'F-201', cap: 2, price: 800 },
-    { id: 'rm-f-202', hostelId: 'hostel-female', number: 'F-202', cap: 2, price: 800 },
-    { id: 'rm-f-203', hostelId: 'hostel-female', number: 'F-203', cap: 2, price: 800 },
-    { id: 'rm-f-301', hostelId: 'hostel-female', number: 'F-301', cap: 3, price: 600 },
-    { id: 'rm-f-302', hostelId: 'hostel-female', number: 'F-302', cap: 3, price: 600 },
+    { id: 'rm-f-101', hostelId: 'hostel-female', number: 'F-101', cap: 1, price: 2400000 },
+    { id: 'rm-f-102', hostelId: 'hostel-female', number: 'F-102', cap: 1, price: 2400000 },
+    { id: 'rm-f-103', hostelId: 'hostel-female', number: 'F-103', cap: 1, price: 2400000 },
+    { id: 'rm-f-104', hostelId: 'hostel-female', number: 'F-104', cap: 1, price: 2400000 },
+    { id: 'rm-f-105', hostelId: 'hostel-female', number: 'F-105', cap: 1, price: 2400000 },
+    { id: 'rm-f-201', hostelId: 'hostel-female', number: 'F-201', cap: 2, price: 1200000 },
+    { id: 'rm-f-202', hostelId: 'hostel-female', number: 'F-202', cap: 2, price: 1200000 },
+    { id: 'rm-f-203', hostelId: 'hostel-female', number: 'F-203', cap: 2, price: 1200000 },
+    { id: 'rm-f-301', hostelId: 'hostel-female', number: 'F-301', cap: 3, price: 800000 },
+    { id: 'rm-f-302', hostelId: 'hostel-female', number: 'F-302', cap: 3, price: 800000 },
   ];
 
   for (const r of roomDefs) {

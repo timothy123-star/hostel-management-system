@@ -138,6 +138,7 @@ CREATE TABLE IF NOT EXISTS booking_groups (
   eligible_at TEXT,
   held_room_id TEXT REFERENCES rooms(id) ON DELETE SET NULL,
   auto_complete_triple_consent INTEGER NOT NULL DEFAULT 0 CHECK (auto_complete_triple_consent IN (0, 1)),
+  billing_currency TEXT NOT NULL DEFAULT 'NGN',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -175,7 +176,9 @@ CREATE TABLE IF NOT EXISTS payments (
   student_id TEXT NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
   booking_group_id TEXT NOT NULL REFERENCES booking_groups(id) ON DELETE RESTRICT,
   amount REAL NOT NULL CHECK (amount >= 0),
+  amount_kobo INTEGER CHECK (amount_kobo IS NULL OR amount_kobo > 0),
   currency TEXT NOT NULL DEFAULT 'USD',
+  provider TEXT NOT NULL DEFAULT 'DEMO_BANK',
   status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'VERIFIED', 'REJECTED')),
   reference_code TEXT NOT NULL UNIQUE,
   verified_by_admin_id TEXT REFERENCES admin_users(id) ON DELETE SET NULL,

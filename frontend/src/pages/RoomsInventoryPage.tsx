@@ -182,7 +182,7 @@ export const RoomsInventoryPage: React.FC = () => {
                       {r.capacity === 1 ? 'Single Room (1)' : r.capacity === 2 ? 'Double Room (2)' : 'Triple Room (3)'}
                     </td>
                     <td className="py-3 px-4 font-semibold text-slate-900">
-                      ${r.price_per_student.toLocaleString()} <span className="text-[10px] text-amber-600 font-normal">(DEMO)</span>
+                      ₦{r.price_per_student.toLocaleString('en-NG')} <span className="text-[10px] text-slate-500 font-normal">NGN per session</span>
                     </td>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2">
@@ -272,7 +272,7 @@ export const RoomsInventoryPage: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">Price Per Student ($ / year DEMO)</label>
+            <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">Price Per Student (₦ NGN per resident per academic session)</label>
             <input
               type="number"
               min="0"
@@ -312,10 +312,10 @@ export const RoomsInventoryPage: React.FC = () => {
         {editingRoom && (
           <form onSubmit={handleUpdatePrice} className="space-y-4">
             <p className="text-xs text-slate-500">
-              Update DEMO accommodation price for Room <strong>{editingRoom.room_number}</strong> ({editingRoom.hostel_code} Hostel).
+              Update inventory reference price for Room <strong>{editingRoom.room_number}</strong> ({editingRoom.hostel_code} Hostel).
             </p>
             <div>
-              <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">Price Per Student ($)</label>
+              <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">Price Per Student (₦ NGN)</label>
               <input
                 type="number"
                 min="0"

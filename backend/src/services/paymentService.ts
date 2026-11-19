@@ -3,6 +3,7 @@ import { getDb } from '../db/connection.js';
 import { Payment, PaymentStatus, HostelCode } from '@hostel/shared';
 import { AuditService } from './auditService.js';
 import { config as appConfig } from '../config.js';
+import { amountsMatch, formatPaymentAmount } from './monnify/pricing.js';
 import { WhatsAppNotificationService } from './whatsapp/whatsappNotifications.js';
 
 export class PaymentService {
@@ -45,7 +46,7 @@ export class PaymentService {
     if (existing.status !== 'PENDING') {
       throw new Error(`Only pending payments can be approved. This payment is already ${existing.status.toLowerCase()}.`);
     }
-    if (existing.currency === 'NGN' || existing.provider === 'MONNIFY' || existing.amount_kobo != null) {
+    if (existing.provider === 'MONNIFY') {
       if (existing.reconciliation_status !== 'RECONCILED') {
         throw new Error('This Monnify payment must complete provider verification with the exact NGN amount before manager approval.');
       }
@@ -71,7 +72,7 @@ export class PaymentService {
       entityId: paymentId,
       oldValues: { status: existing.status },
       newValues: { status: 'VERIFIED', verified_at: now, notes },
-      notes: `Manager approved individual payment of $${existing.amount} (Ref: ${existing.reference_code})`
+      notes: `Manager approved individual payment of ${formatPaymentAmount(existing.amount, existing.currency, existing.amount_kobo)} (Ref: ${existing.reference_code})`
     });
 
     const verified = db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId) as Payment;
@@ -83,7 +84,7 @@ export class PaymentService {
           studentId: (verified as any).student_id,
           phone: student.phone_number,
           kind: 'PAYMENT_APPROVED',
-          bodyText: `✅ Payment approved: $${(verified as any).amount} ${(verified as any).currency} (Ref: ${(verified as any).reference_code}). DEMO ONLY — no real money. Please attach a clear face photograph directly to this WhatsApp chat for manager review.`,
+          bodyText: `✅ Payment approved: ${formatPaymentAmount((verified as any).amount, (verified as any).currency, (verified as any).amount_kobo)} (Ref: ${(verified as any).reference_code}). DEMO PAYMENT — NO REAL MONEY. Please attach a clear face photograph directly to this WhatsApp chat for manager review.`,
           templateName: appConfig.whatsappTemplates.paymentApproved,
           templateParams: [String((verified as any).amount), String((verified as any).currency), String((verified as any).reference_code)],
         });
@@ -100,7 +101,7 @@ export class PaymentService {
       WHERE s.phone_number = ? ORDER BY p.created_at DESC LIMIT 1`).get(phone.trim()) as any;
     if (!payment) throw new Error('No individual payment record was found for this sender.');
     if (!payment.room_number) throw new Error('Payment instructions will be available once your completed group receives a temporary room hold.');
-    return { payment, bank: this.demoBank, demoWarning: 'DEMO ONLY — NO REAL MONEY. This does not connect to a bank or payment provider.' };
+    return { payment, bank: this.demoBank, demoWarning: 'DEMO PAYMENT — NO REAL MONEY. This simulated transfer never moves real funds and never connects to a bank or payment provider.' };
   }
 
   static simulateBankTransfer(phone: string) {
@@ -136,10 +137,14 @@ export class PaymentService {
     if (!txn) throw new Error('Demo bank transaction not found.');
     if (txn.reconciliation_status !== 'PENDING_RECONCILIATION') throw new Error('This transaction has already been resolved.');
     const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(txn.linked_payment_id) as any;
+    const moneyOk = payment ? amountsMatch(
+      { amount: payment.amount, amountKobo: payment.amount_kobo ?? null, currency: payment.currency },
+      { amount: txn.amount, amountKobo: (txn as any).amount_kobo ?? null, currency: txn.currency },
+    ) : false;
     const failure = txn.beneficiary_account !== this.demoBank.accountNumber ? 'Beneficiary account does not match the configured DEMO account.'
       : !payment ? 'Payment reference did not resolve to an individual payment.'
       : payment.reference_code !== txn.payment_reference ? 'Payment reference/narration does not match the linked student payment.'
-      : payment.amount !== txn.amount || payment.currency !== txn.currency ? 'Received amount or currency does not exactly match the expected individual payment.'
+      : !moneyOk ? 'Received amount or currency does not exactly match the expected individual payment.'
       : payment.status !== 'PENDING' ? 'The individual payment has already been settled.' : null;
     const now = new Date().toISOString();
     if (failure) {

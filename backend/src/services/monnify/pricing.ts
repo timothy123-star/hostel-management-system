@@ -31,6 +31,70 @@ export function formatNgn(kobo: number): string {
   return `\u20A6${naira.toLocaleString('en-NG')} per academic session`;
 }
 
+/** Per-resident official display by capacity: "₦2,400,000 NGN per resident per academic session". */
+export function formatOfficialPerResident(capacity: RoomCapacity): string {
+  const kobo = officialAmountKobo(capacity);
+  const naira = koboToNaira(kobo);
+  return `\u20A6${naira.toLocaleString('en-NG')} NGN per resident per academic session`;
+}
+
+/**
+ * Authoritative resolver for NEW booking obligations.
+ * Reads official_session_prices when a DB row is supplied, otherwise uses
+ * the canonical OFFICIAL_NGN_KOBO schedule. Fails closed on drift so a
+ * misconfigured table can never silently create a wrong obligation.
+ * Never trusts browser/WhatsApp-supplied amounts.
+ */
+export function resolveOfficialPricing(
+  capacity: RoomCapacity,
+  dbAmountKobo?: number | null,
+): { amountKobo: number; amountNaira: number; currency: 'NGN' } {
+  const canonical = officialAmountKobo(capacity);
+  if (dbAmountKobo === null || dbAmountKobo === undefined) {
+    return { amountKobo: canonical, amountNaira: koboToNaira(canonical), currency: 'NGN' };
+  }
+  if (!Number.isInteger(dbAmountKobo) || dbAmountKobo <= 0) {
+    throw new Error(`Official price table holds an invalid amount for capacity ${capacity}.`);
+  }
+  if (dbAmountKobo !== canonical) {
+    throw new Error(
+      `Official price drift for capacity ${capacity}: table=${dbAmountKobo} canonical=${canonical}. Refusing to create obligation.`,
+    );
+  }
+  return { amountKobo: canonical, amountNaira: koboToNaira(canonical), currency: 'NGN' };
+}
+
+/** Decimal-safe money comparison. Uses integer kobo when available; never uses float equality. */
+export function amountsMatch(
+  expected: { amount?: number; amountKobo?: number | null; currency: string },
+  actual: { amount?: number; amountKobo?: number | null; currency: string },
+): boolean {
+  if (expected.currency !== actual.currency) return false;
+  if (
+    expected.amountKobo !== null &&
+    expected.amountKobo !== undefined &&
+    actual.amountKobo !== null &&
+    actual.amountKobo !== undefined
+  ) {
+    return expected.amountKobo === actual.amountKobo;
+  }
+  if (expected.currency === 'NGN' && expected.amountKobo != null && actual.amount != null) {
+    try {
+      return koboToNaira(expected.amountKobo) === Number(actual.amount);
+    } catch {
+      return false;
+    }
+  }
+  if (expected.currency === 'NGN' && actual.amountKobo != null && expected.amount != null) {
+    try {
+      return Number(expected.amount) === koboToNaira(actual.amountKobo);
+    } catch {
+      return false;
+    }
+  }
+  return Number(expected.amount) === Number(actual.amount);
+}
+
 /** Currency-aware display for manager/resident surfaces. Never labels demo USD as official. */
 export function formatPaymentAmount(amount: number, currency: string, amountKobo?: number | null): string {
   if (currency === 'NGN' && amountKobo !== null && amountKobo !== undefined) {
